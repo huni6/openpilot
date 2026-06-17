@@ -427,9 +427,9 @@ async def run_logs_put_upload_segments(segments: list[str], job: dict[str, Any] 
   ensure_not_canceled(job)
 
   try:
-    concurrency = max(1, min(6, int(os.environ.get("CARROT_LOGS_UPLOAD_CONCURRENCY", "3") or "3")))
+    concurrency = max(1, min(10, int(os.environ.get("CARROT_LOGS_UPLOAD_CONCURRENCY", "10") or "10")))
   except Exception:
-    concurrency = 3
+    concurrency = 10
   sem = asyncio.Semaphore(concurrency)
   completed = 0
   tracker = UploadProgressTracker(job)

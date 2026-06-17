@@ -335,11 +335,11 @@ decoded path:
 - The default endpoint is `https://logs.carrotpilot.app/upload/routes` and can
   be overridden with `CARROT_LOGS_UPLOAD_URL`.
 - Each selected segment runs concurrently with bounded parallelism controlled
-  by `CARROT_LOGS_UPLOAD_CONCURRENCY`, defaults to `3`, and is clamped to
-  `1..6`.
+  by `CARROT_LOGS_UPLOAD_CONCURRENCY`, defaults to `10`, and is clamped to
+  `1..10`.
 - Within one segment, files are sent concurrently as separate PUT requests.
-  With the default 3 concurrent segments and 3 files per segment, Q upload can
-  have up to about 9 active PUT file transfers.
+  With the default 10 concurrent segments and 3 files per segment, Q upload can
+  have up to about 30 active PUT file transfers.
 - Q upload streams files in chunks controlled by `CARROT_LOGS_UPLOAD_CHUNK_SIZE`,
   default `4 MiB`, clamped to `1..16 MiB`.
 - Q upload uses the same known artifact list as the pre-upload summary:
@@ -406,7 +406,7 @@ discord: Discord webhook attempt result
 | `CARROT_FTP_PASSWORD` | FTP password; prefer setting this in the runtime environment rather than copying secrets into docs. |
 | `CARROT_FTP_CONCURRENCY` | Parallel segment uploads, clamped to `1..6`, default `3`. |
 | `CARROT_LOGS_UPLOAD_URL` | Q upload endpoint, default `https://logs.carrotpilot.app/upload/routes`. |
-| `CARROT_LOGS_UPLOAD_CONCURRENCY` | Parallel Q segment uploads, clamped to `1..6`, default `3`. |
+| `CARROT_LOGS_UPLOAD_CONCURRENCY` | Parallel Q segment uploads, clamped to `1..10`, default `10`. |
 | `CARROT_LOGS_UPLOAD_TIMEOUT` | Per-file Q PUT timeout in seconds, default `600`, minimum `30`. |
 | `CARROT_LOGS_UPLOAD_CHUNK_SIZE` | Q PUT read chunk size in bytes, clamped to `1..16 MiB`, default `4 MiB`. |
 | `CARROT_REPO_DIR` | Repository path used when collecting git metadata. |
