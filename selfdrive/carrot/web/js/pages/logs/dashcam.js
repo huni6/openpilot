@@ -935,6 +935,77 @@ function dashcamUploadSummaryLabel(stats) {
   return `${fileLabel} · ${sizeLabel}`;
 }
 
+function dashcamUploadDurationLabel(seconds) {
+  const value = Number(seconds);
+  if (!Number.isFinite(value) || value < 0) return "-";
+  const total = Math.max(0, Math.round(value));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  const pad = (n) => String(n).padStart(2, "0");
+  return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
+}
+
+function dashcamUploadMetricLabels(snapshot, options = {}) {
+  const nowMs = Date.now();
+  const createdAt = Number(snapshot?.created_at || 0);
+  const startedAtMs = Number(options.startedAtMs || 0) || (createdAt > 0 ? createdAt * 1000 : nowMs);
+  const elapsedSec = Math.max(0, (nowMs - startedAtMs) / 1000);
+  const statsBytes = Number(options.stats?.bytes || 0);
+  const snapshotTotalBytes = Number(snapshot?.bytes_total || snapshot?.bytesTotal || snapshot?.result?.bytesTotal || 0);
+  const totalBytes = Math.max(0, snapshotTotalBytes, statsBytes);
+  const snapshotUploadedBytes = Number(snapshot?.bytes_uploaded || snapshot?.bytesUploaded || snapshot?.result?.bytesUploaded || 0);
+  const percent = Number(snapshot?.progress);
+  let uploadedBytes = Math.max(0, snapshotUploadedBytes);
+  if (uploadedBytes <= 0 && Number.isFinite(percent) && percent > 0 && totalBytes > 0) {
+    uploadedBytes = Math.min(totalBytes, Math.round(totalBytes * Math.max(0, Math.min(100, percent)) / 100));
+  }
+
+  const current = Number(snapshot?.step_current || 0);
+  const total = Number(snapshot?.step_total || options.totalFallback || 0);
+  const speedBps = uploadedBytes > 0 && elapsedSec > 0.5 ? uploadedBytes / elapsedSec : 0;
+  let etaSec = null;
+  if (speedBps > 0 && totalBytes > 0 && uploadedBytes <= totalBytes) {
+    etaSec = Math.max(0, (totalBytes - uploadedBytes) / speedBps);
+  } else if (current > 0 && total > current && elapsedSec > 0.5) {
+    etaSec = ((total - current) * elapsedSec) / current;
+  }
+
+  return {
+    speed: speedBps > 0 ? `${formatLogBytes(speedBps)}/s` : "-",
+    elapsed: dashcamUploadDurationLabel(elapsedSec),
+    eta: etaSec == null ? "-" : dashcamUploadDurationLabel(etaSec),
+  };
+}
+
+function dashcamUploadActiveFileHtml(file) {
+  const name = String(file?.name || "").trim() || "-";
+  const segment = String(file?.segment || "").trim();
+  const size = Number(file?.size || 0);
+  const sent = Math.max(0, Number(file?.sent || 0));
+  const rawPercent = Number(file?.percent);
+  const percent = Number.isFinite(rawPercent)
+    ? Math.max(0, Math.min(100, rawPercent))
+    : (size > 0 ? Math.max(0, Math.min(100, (sent / size) * 100)) : null);
+  const percentLabel = percent == null ? "-" : `${Math.round(percent)}%`;
+  const width = percent == null ? 0 : Math.max(2, Math.min(100, percent));
+  const sizeLabel = size > 0
+    ? `${formatLogBytes(Math.min(sent, size))} / ${formatLogBytes(size)}`
+    : (sent > 0 ? formatLogBytes(sent) : getUIText("upload_size_unknown", "size unknown"));
+  const title = segment ? `${segment}/${name}` : name;
+  return `<div class="dashcam-upload-progress__file" title="${escapeHtml(title)}">
+    <div class="dashcam-upload-progress__file-head">
+      <span>${escapeHtml(name)}</span>
+      <strong>${escapeHtml(percentLabel)}</strong>
+    </div>
+    <div class="dashcam-upload-progress__file-bar" aria-hidden="true"><span style="width:${width}%"></span></div>
+    <div class="dashcam-upload-progress__file-meta">
+      <span>${escapeHtml(segment)}</span>
+      <span>${escapeHtml(sizeLabel)}</span>
+    </div>
+  </div>`;
+}
+
 function dashcamUploadResultHtml(result) {
   const text = String(result?.shareText || result?.message || "");
   const stats = dashcamUploadStats(result?.results || []);
@@ -983,6 +1054,15 @@ function openDashcamUploadProgress(total, stats = null, options = {}) {
     <div class="dashcam-upload-progress__message">0/${Number(total || 0)}</div>
     <div class="dashcam-upload-progress__bar" aria-hidden="true"><span></span></div>
     <div class="dashcam-upload-progress__summary">${escapeHtml(stats ? dashcamUploadSummaryLabel(stats) : getUIText("loading", "Loading..."))}</div>
+    <div class="dashcam-upload-progress__metrics">
+      <div><span>${escapeHtml(getUIText("upload_speed", "속도"))}</span><strong data-upload-metric="speed">-</strong></div>
+      <div><span>${escapeHtml(getUIText("upload_elapsed", "경과"))}</span><strong data-upload-metric="elapsed">0:00</strong></div>
+      <div><span>${escapeHtml(getUIText("upload_eta", "남음"))}</span><strong data-upload-metric="eta">-</strong></div>
+    </div>
+    <div class="dashcam-upload-progress__files" hidden>
+      <div class="dashcam-upload-progress__files-title">${escapeHtml(getUIText("upload_active_files", "진행 중인 파일"))}</div>
+      <div class="dashcam-upload-progress__files-list"></div>
+    </div>
     <div class="dashcam-upload-progress__actions">
       <button class="btn dashcam-upload-progress__cancel" type="button">${escapeHtml(options.cancelLabel || getUIText("cancel", "Cancel"))}</button>
     </div>
@@ -993,6 +1073,11 @@ function openDashcamUploadProgress(total, stats = null, options = {}) {
   const message = overlay.querySelector(".dashcam-upload-progress__message");
   const summary = overlay.querySelector(".dashcam-upload-progress__summary");
   const bar = overlay.querySelector(".dashcam-upload-progress__bar span");
+  const metricSpeed = overlay.querySelector('[data-upload-metric="speed"]');
+  const metricElapsed = overlay.querySelector('[data-upload-metric="elapsed"]');
+  const metricEta = overlay.querySelector('[data-upload-metric="eta"]');
+  const activeFilesBox = overlay.querySelector(".dashcam-upload-progress__files");
+  const activeFilesList = overlay.querySelector(".dashcam-upload-progress__files-list");
   const cancelButton = overlay.querySelector(".dashcam-upload-progress__cancel");
   let closed = false;
   let cancelHandler = typeof options.onCancel === "function" ? options.onCancel : null;
@@ -1041,6 +1126,16 @@ function openDashcamUploadProgress(total, stats = null, options = {}) {
     setSummary(nextStats) {
       if (summary) summary.textContent = nextStats ? dashcamUploadSummaryLabel(nextStats) : "";
     },
+    setMetrics(nextMetrics) {
+      if (metricSpeed) metricSpeed.textContent = nextMetrics?.speed || "-";
+      if (metricElapsed) metricElapsed.textContent = nextMetrics?.elapsed || "0:00";
+      if (metricEta) metricEta.textContent = nextMetrics?.eta || "-";
+    },
+    setActiveFiles(files) {
+      const items = Array.isArray(files) ? files : [];
+      if (activeFilesBox) activeFilesBox.hidden = items.length === 0;
+      if (activeFilesList) activeFilesList.innerHTML = items.map((item) => dashcamUploadActiveFileHtml(item)).join("");
+    },
     close() {
       if (closed) return;
       closed = true;
@@ -1078,17 +1173,25 @@ function getRememberedDashcamUploadJob() {
 
 async function pollDashcamUploadJob(jobId, progress, totalFallback = 0, options = {}) {
   let snapshot = null;
+  let startedAtMs = Number(options.startedAtMs || 0) || 0;
   while (jobId) {
     if (typeof options.isCanceled === "function" && options.isCanceled()) {
       throw makeDashcamUploadCanceledError();
     }
     snapshot = await getJson(`/api/dashcam/upload/job?id=${encodeURIComponent(jobId)}`);
+    if (!startedAtMs && Number(snapshot.created_at || 0) > 0) startedAtMs = Number(snapshot.created_at) * 1000;
     const current = Number(snapshot.step_current || 0);
     const total = Number(snapshot.step_total || totalFallback || 0);
     const percent = Number(snapshot.progress);
     const message = snapshot.message || getUIText("log_uploading", "Uploading logs");
     progress.setMessage(`${current}/${total || totalFallback || 0} · ${message}`);
     progress.setProgress(percent);
+    progress.setMetrics(dashcamUploadMetricLabels(snapshot, {
+      stats: options.stats || null,
+      totalFallback,
+      startedAtMs,
+    }));
+    progress.setActiveFiles(snapshot.active_files || snapshot.activeFiles || []);
     if (snapshot.status === "canceled" || snapshot.result?.canceled) {
       throw makeDashcamUploadCanceledError();
     }
@@ -1128,6 +1231,7 @@ async function resumeDashcamUploadJobIfNeeded() {
 
     rememberDashcamUploadJob(jobId);
     const total = Number(snapshot.step_total || 0);
+    const startedAtMs = Number(snapshot.created_at || 0) > 0 ? Number(snapshot.created_at) * 1000 : Date.now();
     let cancelRequested = false;
     const progress = openDashcamUploadProgress(total, null, {
       onCancel: async () => {
@@ -1146,7 +1250,12 @@ async function resumeDashcamUploadJobIfNeeded() {
     try {
       progress.setMessage(`${Number(snapshot.step_current || 0)}/${total} · ${snapshot.message || getUIText("log_uploading", "Uploading logs")}`);
       progress.setProgress(Number(snapshot.progress));
-      const result = await pollDashcamUploadJob(jobId, progress, total, { isCanceled: () => cancelRequested });
+      progress.setMetrics(dashcamUploadMetricLabels(snapshot, { totalFallback: total, startedAtMs }));
+      progress.setActiveFiles(snapshot.active_files || snapshot.activeFiles || []);
+      const result = await pollDashcamUploadJob(jobId, progress, total, {
+        isCanceled: () => cancelRequested,
+        startedAtMs,
+      });
       clearRememberedDashcamUploadJob(jobId);
       progress.setMessage(`${Number(result.uploaded || 0)}/${Number(result.total || total)}`);
       progress.setProgress(100);
@@ -1215,6 +1324,7 @@ async function uploadDashcamSegments(segments, options = {}) {
   const ok = await appConfirm(confirmMessage, { title: uploadTitle });
   if (!ok) return;
   let cancelRequested = false;
+  const startedAtMs = Date.now();
   const progress = openDashcamUploadProgress(targets.length, uploadStats, {
     onCancel: async () => {
       cancelRequested = true;
@@ -1239,7 +1349,11 @@ async function uploadDashcamSegments(segments, options = {}) {
       await cancelDashcamUploadJob(jobId);
       throw makeDashcamUploadCanceledError();
     }
-    const result = await pollDashcamUploadJob(jobId, progress, targets.length, { isCanceled: () => cancelRequested });
+    const result = await pollDashcamUploadJob(jobId, progress, targets.length, {
+      isCanceled: () => cancelRequested,
+      stats: uploadStats,
+      startedAtMs,
+    });
     clearRememberedDashcamUploadJob(jobId);
     progress.setMessage(`${Number(result.uploaded || 0)}/${Number(result.total || targets.length)}`);
     progress.setProgress(100);

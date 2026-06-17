@@ -233,7 +233,11 @@ Logs page
   `carrot_dashcam_upload_job_id`; page refresh or revisiting the Logs page will
   poll and reattach to the running job when the in-memory server job still
   exists.
-- The client polls upload progress every 850 ms.
+- The client polls upload progress every 850 ms. The progress popup shows
+  upload speed, elapsed time, and estimated remaining time. FTP speed/ETA is
+  based on completed segment bytes, while Q upload updates byte counters as
+  each PUT request streams file chunks. When files are currently being sent,
+  the popup also lists each active file with its own percent and byte progress.
 
 ### HTTP API
 
@@ -348,6 +352,8 @@ ok: true only when every result item uploaded successfully
 uploaded: count of successful segments
 total: count of result items
 filesUploaded/filesTotal: present on Q PUT jobs
+bytesUploaded/bytesTotal: present on upload jobs for progress metrics
+active_files[]: in-progress file rows while a job is running
 uploadedAt: device local timestamp
 uploadMode/uploadUrl: present on Q PUT jobs
 remoteBasePath: routes/<CarName> <DongleId>/ for FTP, logs PUT endpoint/path prefix for Q

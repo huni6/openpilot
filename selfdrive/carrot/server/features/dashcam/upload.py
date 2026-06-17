@@ -242,6 +242,7 @@ async def put_file_to_logs_upload(
   *,
   base_url: str | None = None,
   should_cancel: Callable[[], bool] | None = None,
+  on_progress: Callable[[int], None] | None = None,
 ) -> dict[str, Any]:
   def check_cancel() -> None:
     if should_cancel and should_cancel():
@@ -257,6 +258,8 @@ async def put_file_to_logs_upload(
         chunk = await asyncio.to_thread(f.read, 1024 * 1024)
         if not chunk:
           break
+        if on_progress:
+          on_progress(len(chunk))
         yield chunk
 
   headers = {"Content-Type": "application/octet-stream"}
@@ -285,6 +288,9 @@ def upload_folder_to_ftp(
   directory: str,
   remote_path: str,
   should_cancel: Callable[[], bool] | None = None,
+  on_file_start: Callable[[str, int], None] | None = None,
+  on_file_progress: Callable[[str, int, int, int], None] | None = None,
+  on_file_done: Callable[[str, int], None] | None = None,
 ) -> bool:
   def check_cancel() -> None:
     if should_cancel and should_cancel():
@@ -325,10 +331,28 @@ def upload_folder_to_ftp(
       for filename in files:
         check_cancel()
         local_path = os.path.join(root, filename)
+        rel_file = filename if rel_dir == "." else f"{rel_dir.replace(os.sep, '/')}/{filename}"
+        try:
+          file_size = os.path.getsize(local_path)
+        except OSError:
+          file_size = 0
+        sent = 0
+
+        def note_block(block: bytes) -> None:
+          nonlocal sent
+          delta = len(block or b"")
+          sent += delta
+          if on_file_progress:
+            on_file_progress(rel_file, sent, file_size, delta)
+
+        if on_file_start:
+          on_file_start(rel_file, file_size)
         with open(local_path, "rb") as f:
           # 1MB chunks (vs ftplib's 8KB default) cut per-chunk Python/syscall
           # overhead for large camera files.
-          ftp.storbinary(f"STOR {filename}", f, blocksize=1024 * 1024)
+          ftp.storbinary(f"STOR {filename}", f, blocksize=1024 * 1024, callback=note_block)
+        if on_file_done:
+          on_file_done(rel_file, file_size)
         check_cancel()
     return True
   finally:

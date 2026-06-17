@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import threading
 import time
 import uuid
 from datetime import datetime
@@ -88,6 +89,55 @@ def ensure_not_canceled(job: dict[str, Any] | None) -> None:
     raise UploadCanceled("upload canceled")
 
 
+def start_active_file(
+  job: dict[str, Any] | None,
+  key: str,
+  *,
+  segment: str,
+  name: str,
+  size: int,
+  mode: str,
+) -> None:
+  if not job:
+    return
+  active = job.setdefault("active_files", {})
+  active[key] = {
+    "key": key,
+    "segment": segment,
+    "name": name,
+    "size": max(0, int(size or 0)),
+    "sent": 0,
+    "percent": 0 if int(size or 0) > 0 else None,
+    "mode": mode,
+    "started_at": time.time(),
+  }
+  touch(job)
+
+
+def update_active_file(job: dict[str, Any] | None, key: str, *, sent: int | None = None) -> None:
+  if not job:
+    return
+  active = job.get("active_files")
+  if not isinstance(active, dict) or key not in active:
+    return
+  item = active[key]
+  if sent is not None:
+    item["sent"] = max(0, int(sent or 0))
+  size = int(item.get("size") or 0)
+  if size > 0:
+    item["percent"] = max(0, min(100, round((int(item.get("sent") or 0) / size) * 100)))
+  touch(job)
+
+
+def finish_active_file(job: dict[str, Any] | None, key: str) -> None:
+  if not job:
+    return
+  active = job.get("active_files")
+  if isinstance(active, dict):
+    active.pop(key, None)
+    touch(job)
+
+
 def cancel_job(job_id: str) -> dict[str, Any]:
   job = _jobs.get(job_id)
   if not job:
@@ -101,6 +151,9 @@ def cancel_job(job_id: str) -> dict[str, Any]:
 
 
 def snapshot(job: dict[str, Any]) -> dict[str, Any]:
+  active = job.get("active_files") or {}
+  active_files = list(active.values()) if isinstance(active, dict) else []
+  active_files.sort(key=lambda item: (float(item.get("started_at") or 0), str(item.get("key") or "")))
   return {
     "ok": True,
     "id": job["id"],
@@ -113,6 +166,11 @@ def snapshot(job: dict[str, Any]) -> dict[str, Any]:
     "message": job.get("message") or "",
     "step_current": job.get("step_current"),
     "step_total": job.get("step_total"),
+    "bytes_uploaded": int(job.get("bytes_uploaded") or 0),
+    "bytes_total": int(job.get("bytes_total") or 0),
+    "files_uploaded": int(job.get("files_uploaded") or 0),
+    "files_total": int(job.get("files_total") or 0),
+    "active_files": active_files,
     "error": job.get("error"),
     "created_at": job.get("created_at"),
     "updated_at": job.get("updated_at"),
@@ -162,6 +220,7 @@ def create_job(segments: list[str], action: str = "dashcam_upload") -> dict[str,
     "error": None,
     "result": None,
     "cancel_requested": False,
+    "active_files": {},
     "created_at": now,
     "updated_at": now,
   }
@@ -198,9 +257,14 @@ async def run_upload_segments(segments: list[str], job: dict[str, Any] | None = 
     concurrency = 3
   sem = asyncio.Semaphore(concurrency)
   completed = 0
+  bytes_uploaded = 0
+  bytes_total = 0
+  files_uploaded = 0
+  files_total = 0
+  counter_lock = threading.Lock()
 
   async def upload_one(idx0: int, segment: str) -> None:
-    nonlocal completed
+    nonlocal completed, bytes_uploaded, bytes_total, files_uploaded, files_total
     idx = idx0 + 1
     files: list[Any] = []
     async with sem:
@@ -211,12 +275,47 @@ async def run_upload_segments(segments: list[str], job: dict[str, Any] | None = 
       try:
         segment_path = segment_dir(segment)
         files = await asyncio.to_thread(segment_file_summary, segment_path)
+        manifest = await asyncio.to_thread(upload.segment_upload_files, segment_path)
+        segment_bytes = sum(int(item.get("size") or 0) for item in manifest)
+        segment_files = len(manifest)
+        bytes_total += segment_bytes
+        files_total += segment_files
+        if job:
+          job["bytes_total"] = bytes_total
+          job["files_total"] = files_total
+          touch(job)
+        active_key = f"ftp:{idx0}"
+
+        def on_file_start(name: str, size: int) -> None:
+          start_active_file(job, active_key, segment=segment, name=name, size=size, mode="ftp")
+
+        def on_file_progress(name: str, sent: int, size: int, delta: int) -> None:
+          nonlocal bytes_uploaded
+          with counter_lock:
+            bytes_uploaded += max(0, int(delta or 0))
+            current_bytes_uploaded = bytes_uploaded
+          if job:
+            job["bytes_uploaded"] = current_bytes_uploaded
+            update_active_file(job, active_key, sent=sent)
+
+        def on_file_done(name: str, size: int) -> None:
+          nonlocal files_uploaded
+          with counter_lock:
+            files_uploaded += 1
+            current_files_uploaded = files_uploaded
+          if job:
+            job["files_uploaded"] = current_files_uploaded
+            finish_active_file(job, active_key)
+
         ok = await asyncio.to_thread(
           upload.upload_folder_to_ftp,
           segment_path,
           directory,
           segment,
           (lambda: is_cancel_requested(job)) if job else None,
+          on_file_start if job else None,
+          on_file_progress if job else None,
+          on_file_done if job else None,
         )
         results[idx0] = {
           "segment": segment,
@@ -229,6 +328,7 @@ async def run_upload_segments(segments: list[str], job: dict[str, Any] | None = 
         if job:
           append(job, f"[{idx}/{total}] {segment} OK")
       except Exception as e:
+        finish_active_file(job, f"ftp:{idx0}")
         if is_cancel_requested(job):
           return  # canceled mid-upload — handled after gather
         results[idx0] = {
@@ -246,6 +346,10 @@ async def run_upload_segments(segments: list[str], job: dict[str, Any] | None = 
     completed += 1
     if job:
       job["partial_results"] = [r for r in results if r is not None]
+      job["bytes_uploaded"] = bytes_uploaded
+      job["bytes_total"] = bytes_total
+      job["files_uploaded"] = files_uploaded
+      job["files_total"] = files_total
       progress(job, message=f"Uploaded {completed}/{total}", current=completed, total=total)
 
   await asyncio.gather(*(upload_one(i, seg) for i, seg in enumerate(segments)))
@@ -258,6 +362,10 @@ async def run_upload_segments(segments: list[str], job: dict[str, Any] | None = 
     "ok": ok_count == len(results),
     "uploaded": ok_count,
     "total": len(results),
+    "filesUploaded": files_uploaded,
+    "filesTotal": files_total,
+    "bytesUploaded": bytes_uploaded,
+    "bytesTotal": bytes_total,
     "uploadedAt": uploaded_at,
     "remoteBasePath": remote_base_path,
     "meta": meta,
@@ -303,12 +411,14 @@ async def run_logs_put_upload_segments(segments: list[str], job: dict[str, Any] 
   completed = 0
   files_uploaded = 0
   files_total = 0
+  bytes_uploaded = 0
+  bytes_total = 0
   timeout_seconds = upload.logs_upload_timeout_seconds()
   timeout = ClientTimeout(total=timeout_seconds, sock_connect=20, sock_read=timeout_seconds)
 
   async with ClientSession(timeout=timeout) as session:
     async def upload_one(idx0: int, segment: str) -> None:
-      nonlocal completed, files_uploaded, files_total
+      nonlocal completed, files_uploaded, files_total, bytes_uploaded, bytes_total
       idx = idx0 + 1
       files: list[dict[str, Any]] = []
       async with sem:
@@ -320,6 +430,11 @@ async def run_logs_put_upload_segments(segments: list[str], job: dict[str, Any] 
           segment_path = segment_dir(segment)
           manifest = await asyncio.to_thread(upload.segment_upload_files, segment_path)
           files_total += len(manifest)
+          bytes_total += sum(int(item.get("size") or 0) for item in manifest)
+          if job:
+            job["files_total"] = files_total
+            job["bytes_total"] = bytes_total
+            touch(job)
           files = [
             {
               "name": item.get("name"),
@@ -335,14 +450,36 @@ async def run_logs_put_upload_segments(segments: list[str], job: dict[str, Any] 
             if not name or not local_path:
               continue
             remote_file_path = f"{directory}/{segment}/{name}".replace("\\", "/")
-            await upload.put_file_to_logs_upload(
-              local_path,
-              remote_file_path,
-              session,
-              base_url=base_url,
-              should_cancel=(lambda: is_cancel_requested(job)) if job else None,
-            )
+            active_key = f"put:{idx0}"
+            file_size = int(item.get("size") or 0)
+            file_sent = 0
+            start_active_file(job, active_key, segment=segment, name=name, size=file_size, mode="logs_put")
+
+            def note_bytes(count: int) -> None:
+              nonlocal bytes_uploaded, file_sent
+              delta = max(0, int(count or 0))
+              bytes_uploaded += delta
+              file_sent += delta
+              if job:
+                job["bytes_uploaded"] = bytes_uploaded
+                update_active_file(job, active_key, sent=file_sent)
+                touch(job)
+
+            try:
+              await upload.put_file_to_logs_upload(
+                local_path,
+                remote_file_path,
+                session,
+                base_url=base_url,
+                should_cancel=(lambda: is_cancel_requested(job)) if job else None,
+                on_progress=note_bytes,
+              )
+            finally:
+              finish_active_file(job, active_key)
             files_uploaded += 1
+            if job:
+              job["files_uploaded"] = files_uploaded
+              touch(job)
           results[idx0] = {
             "segment": segment,
             "route": route_name(segment),
@@ -374,6 +511,8 @@ async def run_logs_put_upload_segments(segments: list[str], job: dict[str, Any] 
         job["partial_results"] = [r for r in results if r is not None]
         job["files_uploaded"] = files_uploaded
         job["files_total"] = files_total
+        job["bytes_uploaded"] = bytes_uploaded
+        job["bytes_total"] = bytes_total
         progress(job, message=f"Q uploaded {completed}/{total}", current=completed, total=total)
 
     await asyncio.gather(*(upload_one(i, seg) for i, seg in enumerate(segments)))
@@ -388,6 +527,8 @@ async def run_logs_put_upload_segments(segments: list[str], job: dict[str, Any] 
     "total": len(results),
     "filesUploaded": files_uploaded,
     "filesTotal": files_total,
+    "bytesUploaded": bytes_uploaded,
+    "bytesTotal": bytes_total,
     "uploadedAt": uploaded_at,
     "uploadMode": "logs_put",
     "uploadUrl": base_url,
@@ -414,6 +555,10 @@ async def run_job(job: dict[str, Any]) -> None:
       "canceled": True,
       "uploaded": ok_count,
       "total": total,
+      "filesUploaded": int(job.get("files_uploaded") or 0),
+      "filesTotal": int(job.get("files_total") or 0),
+      "bytesUploaded": int(job.get("bytes_uploaded") or 0),
+      "bytesTotal": int(job.get("bytes_total") or 0),
       "uploadedAt": uploaded_at,
       "remoteBasePath": job.get("remote_base_path") or "",
       "meta": job.get("upload_meta") or {},
@@ -447,6 +592,8 @@ async def run_logs_put_job(job: dict[str, Any]) -> None:
       "total": total,
       "filesUploaded": int(job.get("files_uploaded") or 0),
       "filesTotal": int(job.get("files_total") or 0),
+      "bytesUploaded": int(job.get("bytes_uploaded") or 0),
+      "bytesTotal": int(job.get("bytes_total") or 0),
       "uploadedAt": uploaded_at,
       "uploadMode": "logs_put",
       "remoteBasePath": job.get("remote_base_path") or "",

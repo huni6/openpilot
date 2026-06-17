@@ -801,6 +801,123 @@
   font-weight: 800;
 }
 
+.dashcam-upload-progress__metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.dashcam-upload-progress__metrics div {
+  min-width: 0;
+  padding: 8px 9px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--md-surface-cont-h) 72%, var(--md-surface));
+  border: 1px solid color-mix(in srgb, var(--md-outline-var) 32%, transparent);
+}
+
+.dashcam-upload-progress__metrics span,
+.dashcam-upload-progress__metrics strong {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dashcam-upload-progress__metrics span {
+  color: var(--md-on-surface-var);
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.dashcam-upload-progress__metrics strong {
+  margin-top: 3px;
+  color: var(--md-on-surface);
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.dashcam-upload-progress__files {
+  margin-top: 12px;
+}
+
+.dashcam-upload-progress__files-title {
+  color: var(--md-on-surface-var);
+  font-size: 11.5px;
+  font-weight: 850;
+}
+
+.dashcam-upload-progress__files-list {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-top: 7px;
+  max-height: min(24vh, 164px);
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.dashcam-upload-progress__file {
+  min-width: 0;
+  padding: 8px 9px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--md-outline-var) 32%, transparent);
+  background: color-mix(in srgb, var(--md-surface-cont-h) 58%, var(--md-surface));
+}
+
+.dashcam-upload-progress__file-head,
+.dashcam-upload-progress__file-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.dashcam-upload-progress__file-head span,
+.dashcam-upload-progress__file-meta span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dashcam-upload-progress__file-head span {
+  color: var(--md-on-surface);
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.dashcam-upload-progress__file-head strong {
+  flex: 0 0 auto;
+  color: var(--md-primary);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.dashcam-upload-progress__file-bar {
+  height: 3px;
+  margin-top: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--md-outline-var) 28%, transparent);
+}
+
+.dashcam-upload-progress__file-bar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--md-primary);
+}
+
+.dashcam-upload-progress__file-meta {
+  margin-top: 5px;
+  color: var(--md-on-surface-var);
+  font-size: 10.5px;
+  font-weight: 750;
+}
+
 .dashcam-upload-progress__actions {
   display: flex;
   justify-content: flex-end;
@@ -877,6 +994,46 @@
   .dashcam-upload-progress__summary {
     margin-top: 8px;
     font-size: 11px;
+  }
+
+  .dashcam-upload-progress__metrics {
+    gap: 6px;
+    margin-top: 8px;
+  }
+
+  .dashcam-upload-progress__metrics div {
+    padding: 6px 7px;
+  }
+
+  .dashcam-upload-progress__metrics span {
+    font-size: 10.5px;
+  }
+
+  .dashcam-upload-progress__metrics strong {
+    font-size: 11.5px;
+  }
+
+  .dashcam-upload-progress__files {
+    margin-top: 8px;
+  }
+
+  .dashcam-upload-progress__files-list {
+    gap: 5px;
+    margin-top: 5px;
+    max-height: min(22vh, 112px);
+  }
+
+  .dashcam-upload-progress__file {
+    padding: 6px 7px;
+  }
+
+  .dashcam-upload-progress__file-head span,
+  .dashcam-upload-progress__file-head strong {
+    font-size: 11px;
+  }
+
+  .dashcam-upload-progress__file-meta {
+    font-size: 10px;
   }
 
   .dashcam-upload-progress__actions {
