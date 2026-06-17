@@ -3,6 +3,7 @@ import base64
 import json
 import os
 import subprocess
+import time
 from ftplib import FTP
 from typing import Any, Callable
 from urllib.parse import quote
@@ -19,6 +20,7 @@ LOGS_UPLOAD_URL_DEFAULT = "https://logs.carrotpilot.app/upload/routes"
 LOGS_UPLOAD_CONTENT_TYPE_DEFAULT = "application/octet-stream"
 LOGS_UPLOAD_MAX_FILE_SIZE = 40 * 1024 * 1024
 LOGS_UPLOAD_ACCEPT_ENCODING = "identity"
+LOGS_UPLOAD_CHUNK_SIZE_DEFAULT = 4 * 1024 * 1024
 
 
 def param_text(params: Any, key: str, default: str = "unknown") -> str:
@@ -252,10 +254,15 @@ def logs_upload_timeout_seconds() -> float:
 
 def logs_upload_chunk_size() -> int:
   try:
-    size = int(os.environ.get("CARROT_LOGS_UPLOAD_CHUNK_SIZE", str(50 * 1024 * 1024)) or str(50 * 1024 * 1024))
+    size = int(os.environ.get("CARROT_LOGS_UPLOAD_CHUNK_SIZE", str(LOGS_UPLOAD_CHUNK_SIZE_DEFAULT)) or str(LOGS_UPLOAD_CHUNK_SIZE_DEFAULT))
   except Exception:
-    size = 50 * 1024 * 1024
+    size = LOGS_UPLOAD_CHUNK_SIZE_DEFAULT
   return max(1024 * 1024, min(50 * 1024 * 1024, size))
+
+
+def logs_upload_debug_enabled() -> bool:
+  value = os.environ.get("CARROT_LOGS_UPLOAD_DEBUG", "")
+  return value.strip().lower() in ("1", "true", "yes", "on")
 
 
 async def put_file_to_logs_upload(
@@ -281,6 +288,8 @@ async def put_file_to_logs_upload(
   content_type = LOGS_UPLOAD_CONTENT_TYPE_DEFAULT
   validate_logs_upload_request(path, file_size)
   chunk_size = logs_upload_chunk_size()
+  started_at = time.monotonic()
+  presign_started_at = started_at
 
   presign_url = logs_upload_presign_url(path, endpoint)
   check_cancel()
@@ -303,6 +312,7 @@ async def put_file_to_logs_upload(
       detail = str(presign.get("error") or presign.get("message") or text).strip()[:500]
       suffix = f": {detail}" if detail else ""
       raise RuntimeError(f"presign HTTP {resp.status} for {path}{suffix}")
+  presign_seconds = time.monotonic() - presign_started_at
 
   method = str(presign.get("method") or "PUT").upper()
   upload_url = str(presign.get("uploadUrl") or "").strip()
@@ -324,19 +334,26 @@ async def put_file_to_logs_upload(
   headers["Accept-Encoding"] = LOGS_UPLOAD_ACCEPT_ENCODING
   headers["Content-Type"] = content_type
   headers["Content-Length"] = str(file_size)
+  read_seconds = 0.0
+  chunk_count = 0
 
   async def file_chunks():
+    nonlocal read_seconds, chunk_count
     with open(local_path, "rb") as f:
       while True:
         check_cancel()
+        read_started_at = time.monotonic()
         chunk = await asyncio.to_thread(f.read, chunk_size)
+        read_seconds += time.monotonic() - read_started_at
         if not chunk:
           break
+        chunk_count += 1
         if on_progress:
           on_progress(len(chunk))
         yield chunk
 
   check_cancel()
+  put_started_at = time.monotonic()
   async with session.put(
     upload_url,
     data=file_chunks(),
@@ -349,12 +366,20 @@ async def put_file_to_logs_upload(
       suffix = f": {detail}" if detail else ""
       raise RuntimeError(f"upload PUT HTTP {resp.status}{suffix}")
     check_cancel()
+  put_seconds = time.monotonic() - put_started_at
+  total_seconds = time.monotonic() - started_at
   return {
     "ok": True,
     "endpoint": endpoint,
-    "key": presign.get("key"),
     "path": presign.get("path") or path,
     "expiresIn": presign.get("expiresIn"),
+    "size": file_size,
+    "chunkSize": chunk_size,
+    "chunks": chunk_count,
+    "presignSeconds": presign_seconds,
+    "readSeconds": read_seconds,
+    "putSeconds": put_seconds,
+    "totalSeconds": total_seconds,
   }
 
 

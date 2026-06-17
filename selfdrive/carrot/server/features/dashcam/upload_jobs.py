@@ -435,8 +435,9 @@ async def run_logs_put_upload_segments(segments: list[str], job: dict[str, Any] 
   tracker = UploadProgressTracker(job)
   timeout_seconds = upload.logs_upload_timeout_seconds()
   timeout = ClientTimeout(total=timeout_seconds, sock_connect=20, sock_read=timeout_seconds)
+  debug_timing = upload.logs_upload_debug_enabled()
 
-  async with ClientSession(timeout=timeout) as session:
+  async with ClientSession(timeout=timeout, auto_decompress=False) as session:
     async def upload_one(idx0: int, segment: str) -> None:
       nonlocal completed
       idx = idx0 + 1
@@ -485,7 +486,7 @@ async def run_logs_put_upload_segments(segments: list[str], job: dict[str, Any] 
               tracker.add_bytes(active_key, delta, sent=file_sent)
 
             try:
-              await upload.put_file_to_logs_upload(
+              detail = await upload.put_file_to_logs_upload(
                 local_path,
                 remote_file_path,
                 session,
@@ -493,6 +494,22 @@ async def run_logs_put_upload_segments(segments: list[str], job: dict[str, Any] 
                 should_cancel=(lambda: is_cancel_requested(job)) if job else None,
                 on_progress=note_bytes,
               )
+              if 0 <= file_idx < len(files):
+                files[file_idx]["uploadSeconds"] = detail.get("totalSeconds")
+                files[file_idx]["putSeconds"] = detail.get("putSeconds")
+                files[file_idx]["presignSeconds"] = detail.get("presignSeconds")
+                files[file_idx]["chunks"] = detail.get("chunks")
+              if debug_timing and job:
+                total_s = max(0.001, float(detail.get("totalSeconds") or 0))
+                put_s = max(0.001, float(detail.get("putSeconds") or 0))
+                speed = upload.file_size_label(int(file_size / put_s))
+                append(
+                  job,
+                  f"[{idx}/{total}] {segment}/{name} Q PUT {upload.file_size_label(file_size)} "
+                  f"total={total_s:.2f}s presign={float(detail.get('presignSeconds') or 0):.2f}s "
+                  f"put={put_s:.2f}s read={float(detail.get('readSeconds') or 0):.2f}s "
+                  f"chunks={int(detail.get('chunks') or 0)} speed={speed}/s",
+                )
             except Exception as exc:
               tracker.clear_file(active_key)
               return exc

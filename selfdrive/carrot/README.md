@@ -348,7 +348,10 @@ body: raw file bytes
   With the default 4 concurrent segments and 3 files per segment, Q upload can
   have up to about 12 active PUT file transfers.
 - Q upload streams files in chunks controlled by `CARROT_LOGS_UPLOAD_CHUNK_SIZE`,
-  default `50 MiB`, clamped to `1..50 MiB`.
+  default `4 MiB`, clamped to `1..50 MiB`. The smaller default keeps uploads
+  streaming instead of reading most files into one large in-memory chunk.
+- Set `CARROT_LOGS_UPLOAD_DEBUG=1` to add per-file timing lines for presign,
+  file read, upload PUT, chunk count, and effective upload speed.
 - Q upload uses the same known artifact list as the pre-upload summary:
   `qcamera.mp4`, `qcamera.ts`, `rlog.zst`, `rlog.bz2`, `rlog`, `qlog.zst`,
   `qlog.bz2`, and `qlog`. It does not upload arbitrary extra files from the
@@ -415,7 +418,8 @@ discord: Discord webhook attempt result
 | `CARROT_LOGS_UPLOAD_URL` | Q upload presign endpoint, default `https://logs.carrotpilot.app/upload/routes`. |
 | `CARROT_LOGS_UPLOAD_CONCURRENCY` | Parallel Q segment uploads, clamped to `1..10`, default `4`. |
 | `CARROT_LOGS_UPLOAD_TIMEOUT` | Per-file Q presign plus upload PUT timeout in seconds, default `600`, minimum `30`. |
-| `CARROT_LOGS_UPLOAD_CHUNK_SIZE` | Q PUT read chunk size in bytes, clamped to `1..50 MiB`, default `50 MiB`. |
+| `CARROT_LOGS_UPLOAD_CHUNK_SIZE` | Q PUT read chunk size in bytes, clamped to `1..50 MiB`, default `4 MiB`. |
+| `CARROT_LOGS_UPLOAD_DEBUG` | When truthy, log per-file Q upload timing and speed details. |
 | `CARROT_REPO_DIR` | Repository path used when collecting git metadata. |
 | `CARROT_DEVICE_SERIAL`, `DEVICE_SERIAL`, `SERIAL` | Serial fallbacks before `HARDWARE.get_serial()`. |
 | `CARROT_DISCORD_WEBHOOK_URL`, `DISCORD_WEBHOOK_URL` | Optional Discord webhook override. |
