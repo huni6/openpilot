@@ -1,10 +1,10 @@
 import asyncio
 import base64
+import json
 import os
 import subprocess
 from ftplib import FTP
 from typing import Any, Callable
-from urllib.parse import quote
 
 from aiohttp import ClientSession, ClientTimeout
 
@@ -15,6 +15,8 @@ from .paths import file_size_label
 
 
 LOGS_UPLOAD_URL_DEFAULT = "https://logs.carrotpilot.app/upload/routes"
+LOGS_UPLOAD_CONTENT_TYPE_DEFAULT = "application/octet-stream"
+LOGS_UPLOAD_MAX_FILE_SIZE = 40 * 1024 * 1024
 
 
 def param_text(params: Any, key: str, default: str = "unknown") -> str:
@@ -218,14 +220,19 @@ def logs_upload_url() -> str:
   return (os.environ.get("CARROT_LOGS_UPLOAD_URL", LOGS_UPLOAD_URL_DEFAULT) or LOGS_UPLOAD_URL_DEFAULT).strip()
 
 
-def logs_upload_url_for_path(remote_path: str, base_url: str | None = None) -> str:
-  endpoint = (base_url or logs_upload_url()).strip() or LOGS_UPLOAD_URL_DEFAULT
-  separator = "&" if "?" in endpoint else "?"
-  return f"{endpoint}{separator}path={quote(remote_path, safe='')}"
+def logs_upload_path(remote_path: str) -> str:
+  return str(remote_path or "").replace("\\", "/").strip().lstrip("/")
 
 
-def logs_upload_put_url(remote_path: str, base_url: str | None = None) -> str:
-  return logs_upload_url_for_path(remote_path.strip("/"), base_url)
+def validate_logs_upload_request(path: str, size: int | None = None) -> None:
+  if not path:
+    raise RuntimeError("upload path is required")
+  if len(path) > 1024:
+    raise RuntimeError("upload path is too long")
+  if any(ord(ch) < 32 or ord(ch) == 127 for ch in path):
+    raise RuntimeError("upload path contains control character")
+  if size is not None and (size <= 0 or size > LOGS_UPLOAD_MAX_FILE_SIZE):
+    raise RuntimeError(f"upload file size must be 1..{LOGS_UPLOAD_MAX_FILE_SIZE} bytes")
 
 
 def logs_upload_timeout_seconds() -> float:
@@ -257,8 +264,60 @@ async def put_file_to_logs_upload(
       raise RuntimeError("upload canceled")
 
   check_cancel()
-  url = logs_upload_put_url(remote_path, base_url)
+  endpoint = (base_url or logs_upload_url()).strip() or LOGS_UPLOAD_URL_DEFAULT
+  path = logs_upload_path(remote_path)
+  try:
+    file_size = os.path.getsize(local_path)
+  except OSError as exc:
+    raise RuntimeError(f"cannot read upload file size: {exc}") from exc
+  content_type = LOGS_UPLOAD_CONTENT_TYPE_DEFAULT
+  validate_logs_upload_request(path, file_size)
   chunk_size = logs_upload_chunk_size()
+
+  presign_payload = {
+    "path": path,
+    "size": file_size,
+    "contentType": content_type,
+  }
+  check_cancel()
+  async with session.post(
+    endpoint,
+    json=presign_payload,
+    headers={"Content-Type": "application/json"},
+    allow_redirects=False,
+  ) as resp:
+    text = await resp.text()
+    try:
+      presign = json.loads(text) if text else {}
+    except Exception as exc:
+      detail = text.strip()[:500]
+      suffix = f": {detail}" if detail else ""
+      raise RuntimeError(f"presign returned invalid JSON HTTP {resp.status}{suffix}") from exc
+    if not 200 <= resp.status < 300 or not presign.get("ok"):
+      detail = str(presign.get("error") or presign.get("message") or text).strip()[:500]
+      suffix = f": {detail}" if detail else ""
+      raise RuntimeError(f"presign HTTP {resp.status}{suffix}")
+
+  method = str(presign.get("method") or "PUT").upper()
+  upload_url = str(presign.get("uploadUrl") or "").strip()
+  if method != "PUT":
+    raise RuntimeError(f"presign returned unsupported method {method}")
+  if not upload_url:
+    raise RuntimeError("presign response missing uploadUrl")
+
+  response_headers = presign.get("headers")
+  if not isinstance(response_headers, dict):
+    raise RuntimeError("presign response missing headers")
+  headers = {str(k): str(v) for k, v in response_headers.items() if k and v is not None}
+  lower_headers = {k.lower(): v for k, v in headers.items()}
+  if "content-type" not in lower_headers:
+    headers["Content-Type"] = content_type
+  if "x-amz-meta-path" not in lower_headers:
+    raise RuntimeError("presign response missing required metadata header")
+  if lower_headers.get("x-amz-meta-path") != path:
+    raise RuntimeError("presign metadata path does not match requested path")
+  if "content-length" not in lower_headers:
+    headers["Content-Length"] = str(file_size)
 
   async def file_chunks():
     with open(local_path, "rb") as f:
@@ -271,25 +330,26 @@ async def put_file_to_logs_upload(
           on_progress(len(chunk))
         yield chunk
 
-  headers = {"Content-Type": "application/octet-stream"}
-  try:
-    headers["Content-Length"] = str(os.path.getsize(local_path))
-  except OSError:
-    pass
-
   check_cancel()
   async with session.put(
-    url,
+    upload_url,
     data=file_chunks(),
     headers=headers,
+    allow_redirects=False,
   ) as resp:
     if not 200 <= resp.status < 300:
       text = await resp.text()
       detail = text.strip()[:500]
       suffix = f": {detail}" if detail else ""
-      raise RuntimeError(f"HTTP {resp.status}{suffix}")
+      raise RuntimeError(f"upload PUT HTTP {resp.status}{suffix}")
     check_cancel()
-  return {"ok": True, "url": url}
+  return {
+    "ok": True,
+    "endpoint": endpoint,
+    "key": presign.get("key"),
+    "path": presign.get("path") or path,
+    "expiresIn": presign.get("expiresIn"),
+  }
 
 
 def upload_folder_to_ftp(

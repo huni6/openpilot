@@ -414,7 +414,7 @@ async def run_logs_put_upload_segments(segments: list[str], job: dict[str, Any] 
   dongle_id = meta.get("dongleId") or "unknown"
   directory = f"{car_selected} {dongle_id}".strip()
   base_url = upload.logs_upload_url()
-  remote_base_path = upload.logs_upload_url_for_path(f"{directory}/".replace("\\", "/"), base_url)
+  remote_base_path = upload.logs_upload_path(f"routes/{directory}/")
   total = len(segments)
   results: list[Any] = [None] * total
 
@@ -472,7 +472,7 @@ async def run_logs_put_upload_segments(segments: list[str], job: dict[str, Any] 
             local_path = str(item.get("path") or "")
             if not name or not local_path:
               return None
-            remote_file_path = f"{directory}/{segment}/{name}".replace("\\", "/")
+            remote_file_path = upload.logs_upload_path(f"routes/{directory}/{segment}/{name}")
             active_key = f"put:{idx0}:{file_idx}"
             file_size = int(item.get("size") or 0)
             file_sent = 0
@@ -493,9 +493,9 @@ async def run_logs_put_upload_segments(segments: list[str], job: dict[str, Any] 
                 should_cancel=(lambda: is_cancel_requested(job)) if job else None,
                 on_progress=note_bytes,
               )
-            except Exception:
+            except Exception as exc:
               tracker.clear_file(active_key)
-              return e
+              return exc
             tracker.finish_file(active_key)
             return None
 
@@ -511,7 +511,7 @@ async def run_logs_put_upload_segments(segments: list[str], job: dict[str, Any] 
             "segmentIndex": segment_index(segment),
             "ok": True,
             "uploadMode": "logs_put",
-            "remotePath": upload.logs_upload_url_for_path(f"{directory}/{segment}/".replace("\\", "/"), base_url),
+            "remotePath": upload.logs_upload_path(f"routes/{directory}/{segment}/"),
             "files": files,
           }
           if job:
@@ -525,7 +525,7 @@ async def run_logs_put_upload_segments(segments: list[str], job: dict[str, Any] 
             "segmentIndex": segment_index(segment),
             "ok": False,
             "uploadMode": "logs_put",
-            "remotePath": upload.logs_upload_url_for_path(f"{directory}/{segment}/".replace("\\", "/"), base_url),
+            "remotePath": upload.logs_upload_path(f"routes/{directory}/{segment}/"),
             "files": files,
             "error": str(e),
           }

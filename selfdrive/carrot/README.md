@@ -305,35 +305,43 @@ remote:
 - Cancel results keep `partial_results` for segments that completed before the
   cancel was observed.
 
-### Logs PUT Transfer
+### Logs Presigned PUT Transfer
 
-`선택 전송(Q)` uploads each file with HTTP `PUT`:
+`선택 전송(Q)` uploads each file through a server-issued presigned upload URL.
+The presign endpoint receives only JSON metadata; the file body is sent directly
+to the returned upload URL.
 
 ```text
-PUT https://logs.carrotpilot.app/upload/routes?path=<CarName%20DongleId%2Fsegment%2Ffile>
+POST https://logs.carrotpilot.app/upload/routes
+Content-Type: application/json
+
+{
+  "path": "routes/<CarName> <DongleId>/<segment>/qlog.bz2",
+  "size": 123456,
+  "contentType": "application/octet-stream"
+}
+```
+
+The presign endpoint returns `method=PUT`, `uploadUrl`, and the exact headers
+to use for the upload request:
+
+```text
+PUT <uploadUrl>
 Content-Type: application/octet-stream
+<server-provided metadata headers>
 body: raw file bytes
 ```
 
-Example remote path shape:
-
-```text
-local:
-  /data/media/0/realdata/<route-name>--1/qlog.bz2
-
-request:
-  https://logs.carrotpilot.app/upload/routes?path=<CarName%20DongleId%2Froute-name--1%2Fqlog.bz2>
-
-decoded path:
-  <CarName> <DongleId>/<route-name>--1/qlog.bz2
-```
-
-- The query `path` value is URL-encoded as one full path string, so `/` becomes
-  `%2F`, matching the curl-style example.
-- The Q upload remote segment directory is the same selected segment folder
-  name used by the legacy FTP upload.
-- The default endpoint is `https://logs.carrotpilot.app/upload/routes` and can
-  be overridden with `CARROT_LOGS_UPLOAD_URL`.
+- The Q upload final path always starts with `routes/` and uses the same
+  selected segment folder name as the legacy FTP upload:
+  `routes/<CarName> <DongleId>/<segment>/<file>`.
+- The default presign endpoint is `https://logs.carrotpilot.app/upload/routes`
+  and can be overridden with `CARROT_LOGS_UPLOAD_URL`.
+- The client locally rejects empty paths, paths longer than 1024 characters,
+  paths containing control characters, and files larger than `40 MiB`, matching
+  the server validation contract.
+- The client sends exactly one file per presign request and one file per
+  `PUT`; multipart/form-data multi-file uploads are not used.
 - Each selected segment runs concurrently with bounded parallelism controlled
   by `CARROT_LOGS_UPLOAD_CONCURRENCY`, defaults to `4`, and is clamped to
   `1..10`.
@@ -346,8 +354,8 @@ decoded path:
   `qcamera.mp4`, `qcamera.ts`, `rlog.zst`, `rlog.bz2`, `rlog`, `qlog.zst`,
   `qlog.bz2`, and `qlog`. It does not upload arbitrary extra files from the
   segment folder.
-- PUT request timeout defaults to 600 seconds per request and can be changed
-  with `CARROT_LOGS_UPLOAD_TIMEOUT`.
+- Presign plus upload PUT timeout defaults to 600 seconds per file and can be
+  changed with `CARROT_LOGS_UPLOAD_TIMEOUT`.
 - Q upload does not send the legacy Discord webhook; the result dialog still
   provides the normal copyable share text.
 
@@ -365,7 +373,7 @@ active_files[]: in-progress file rows while a job is running
 elapsedSeconds: job wall time, shown next to the completed file/size summary
 uploadedAt: device local timestamp
 uploadMode/uploadUrl: present on Q PUT jobs
-remoteBasePath: routes/<CarName> <DongleId>/ for FTP, logs PUT endpoint/path prefix for Q
+remoteBasePath: routes/<CarName> <DongleId>/ for FTP and Q uploads
 meta: carName, dongleId, serial, branch, commit, commitDate
 results[]: segment, route, segmentIndex, ok, remotePath, files[], optional error
 message: "<uploaded>/<total> uploaded"
@@ -405,9 +413,9 @@ discord: Discord webhook attempt result
 | `CARROT_FTP_USERNAME` | FTP username. |
 | `CARROT_FTP_PASSWORD` | FTP password; prefer setting this in the runtime environment rather than copying secrets into docs. |
 | `CARROT_FTP_CONCURRENCY` | Parallel segment uploads, clamped to `1..6`, default `3`. |
-| `CARROT_LOGS_UPLOAD_URL` | Q upload endpoint, default `https://logs.carrotpilot.app/upload/routes`. |
+| `CARROT_LOGS_UPLOAD_URL` | Q upload presign endpoint, default `https://logs.carrotpilot.app/upload/routes`. |
 | `CARROT_LOGS_UPLOAD_CONCURRENCY` | Parallel Q segment uploads, clamped to `1..10`, default `4`. |
-| `CARROT_LOGS_UPLOAD_TIMEOUT` | Per-file Q PUT timeout in seconds, default `600`, minimum `30`. |
+| `CARROT_LOGS_UPLOAD_TIMEOUT` | Per-file Q presign plus upload PUT timeout in seconds, default `600`, minimum `30`. |
 | `CARROT_LOGS_UPLOAD_CHUNK_SIZE` | Q PUT read chunk size in bytes, clamped to `1..50 MiB`, default `50 MiB`. |
 | `CARROT_REPO_DIR` | Repository path used when collecting git metadata. |
 | `CARROT_DEVICE_SERIAL`, `DEVICE_SERIAL`, `SERIAL` | Serial fallbacks before `HARDWARE.get_serial()`. |
