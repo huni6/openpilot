@@ -342,13 +342,13 @@ body: raw file bytes
   file extension. Compressed log files such as `.zst` are still raw binary file
   bodies, not HTTP content-encoded requests.
 - Each selected segment runs concurrently with bounded parallelism controlled
-  by `CARROT_LOGS_UPLOAD_CONCURRENCY`, defaults to `4`, and is clamped to
+  by `CARROT_LOGS_UPLOAD_CONCURRENCY`, defaults to `10`, and is clamped to
   `1..10`.
 - Within one segment, files are sent concurrently as separate PUT requests.
-  With the default 4 concurrent segments and 3 files per segment, Q upload can
-  have up to about 12 active PUT file transfers.
+  With the default 10 concurrent segments and 3 files per segment, Q upload can
+  have up to about 30 active PUT file transfers.
 - Q upload streams files in chunks controlled by `CARROT_LOGS_UPLOAD_CHUNK_SIZE`,
-  default `4 MiB`, clamped to `1..50 MiB`. The smaller default keeps uploads
+  default `1 MiB`, clamped to `1..50 MiB`. The smaller default keeps uploads
   streaming instead of reading most files into one large in-memory chunk.
 - Set `CARROT_LOGS_UPLOAD_DEBUG=1` to add per-file timing lines for presign,
   file read, upload PUT, chunk count, and effective upload speed.
@@ -416,9 +416,9 @@ discord: Discord webhook attempt result
 | `CARROT_FTP_PASSWORD` | FTP password; prefer setting this in the runtime environment rather than copying secrets into docs. |
 | `CARROT_FTP_CONCURRENCY` | Parallel segment uploads, clamped to `1..6`, default `3`. |
 | `CARROT_LOGS_UPLOAD_URL` | Q upload presign endpoint, default `https://logs.carrotpilot.app/upload/routes`. |
-| `CARROT_LOGS_UPLOAD_CONCURRENCY` | Parallel Q segment uploads, clamped to `1..10`, default `4`. |
+| `CARROT_LOGS_UPLOAD_CONCURRENCY` | Parallel Q segment uploads, clamped to `1..10`, default `10`. |
 | `CARROT_LOGS_UPLOAD_TIMEOUT` | Per-file Q presign plus upload PUT timeout in seconds, default `600`, minimum `30`. |
-| `CARROT_LOGS_UPLOAD_CHUNK_SIZE` | Q PUT read chunk size in bytes, clamped to `1..50 MiB`, default `4 MiB`. |
+| `CARROT_LOGS_UPLOAD_CHUNK_SIZE` | Q PUT read chunk size in bytes, clamped to `1..50 MiB`, default `1 MiB`. |
 | `CARROT_LOGS_UPLOAD_DEBUG` | When truthy, log per-file Q upload timing and speed details. |
 | `CARROT_REPO_DIR` | Repository path used when collecting git metadata. |
 | `CARROT_DEVICE_SERIAL`, `DEVICE_SERIAL`, `SERIAL` | Serial fallbacks before `HARDWARE.get_serial()`. |

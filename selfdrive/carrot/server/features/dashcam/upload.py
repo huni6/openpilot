@@ -20,7 +20,7 @@ LOGS_UPLOAD_URL_DEFAULT = "https://logs.carrotpilot.app/upload/routes"
 LOGS_UPLOAD_CONTENT_TYPE_DEFAULT = "application/octet-stream"
 LOGS_UPLOAD_MAX_FILE_SIZE = 40 * 1024 * 1024
 LOGS_UPLOAD_ACCEPT_ENCODING = "identity"
-LOGS_UPLOAD_CHUNK_SIZE_DEFAULT = 4 * 1024 * 1024
+LOGS_UPLOAD_CHUNK_SIZE_DEFAULT = 1024 * 1024
 
 
 def param_text(params: Any, key: str, default: str = "unknown") -> str:
