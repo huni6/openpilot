@@ -472,7 +472,7 @@ async def run_logs_put_upload_segments(segments: list[str], job: dict[str, Any] 
             local_path = str(item.get("path") or "")
             if not name or not local_path:
               return None
-            remote_file_path = upload.logs_upload_path(f"routes/{directory}/{segment}/{name}")
+            remote_file_path = upload.logs_upload_path(f"{directory}/{segment}/{name}")
             active_key = f"put:{idx0}:{file_idx}"
             file_size = int(item.get("size") or 0)
             file_sent = 0

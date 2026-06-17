@@ -308,18 +308,12 @@ remote:
 ### Logs Presigned PUT Transfer
 
 `선택 전송(Q)` uploads each file through a server-issued presigned upload URL.
-The presign endpoint receives only JSON metadata; the file body is sent directly
-to the returned upload URL.
+The presign endpoint receives the destination path as a query parameter; the
+file body is sent directly to the returned upload URL.
 
 ```text
-POST https://logs.carrotpilot.app/upload/routes
-Content-Type: application/json
-
-{
-  "path": "routes/<CarName> <DongleId>/<segment>/qlog.bz2",
-  "size": 123456,
-  "contentType": "application/octet-stream"
-}
+POST https://logs.carrotpilot.app/upload/routes?path=<CarName%20DongleId%2Fsegment%2Fqlog.bz2>
+Content-Type: application/octet-stream
 ```
 
 The presign endpoint returns `method=PUT`, `uploadUrl`, and the exact headers
@@ -332,8 +326,10 @@ Content-Type: application/octet-stream
 body: raw file bytes
 ```
 
-- The Q upload final path always starts with `routes/` and uses the same
-  selected segment folder name as the legacy FTP upload:
+- The Q upload presign `path` is relative to the `/upload/routes` endpoint and
+  uses the same selected segment folder name as the legacy FTP upload:
+  `<CarName> <DongleId>/<segment>/<file>`.
+- The result dialog still shows the logical route path as
   `routes/<CarName> <DongleId>/<segment>/<file>`.
 - The default presign endpoint is `https://logs.carrotpilot.app/upload/routes`
   and can be overridden with `CARROT_LOGS_UPLOAD_URL`.

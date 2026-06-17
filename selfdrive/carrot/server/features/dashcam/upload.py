@@ -5,6 +5,7 @@ import os
 import subprocess
 from ftplib import FTP
 from typing import Any, Callable
+from urllib.parse import quote
 
 from aiohttp import ClientSession, ClientTimeout
 
@@ -224,6 +225,12 @@ def logs_upload_path(remote_path: str) -> str:
   return str(remote_path or "").replace("\\", "/").strip().lstrip("/")
 
 
+def logs_upload_presign_url(path: str, base_url: str | None = None) -> str:
+  endpoint = (base_url or logs_upload_url()).strip() or LOGS_UPLOAD_URL_DEFAULT
+  separator = "&" if "?" in endpoint else "?"
+  return f"{endpoint}{separator}path={quote(path, safe='')}"
+
+
 def validate_logs_upload_request(path: str, size: int | None = None) -> None:
   if not path:
     raise RuntimeError("upload path is required")
@@ -274,16 +281,11 @@ async def put_file_to_logs_upload(
   validate_logs_upload_request(path, file_size)
   chunk_size = logs_upload_chunk_size()
 
-  presign_payload = {
-    "path": path,
-    "size": file_size,
-    "contentType": content_type,
-  }
+  presign_url = logs_upload_presign_url(path, endpoint)
   check_cancel()
   async with session.post(
-    endpoint,
-    json=presign_payload,
-    headers={"Content-Type": "application/json"},
+    presign_url,
+    headers={"Content-Type": content_type},
     allow_redirects=False,
   ) as resp:
     text = await resp.text()
@@ -292,11 +294,11 @@ async def put_file_to_logs_upload(
     except Exception as exc:
       detail = text.strip()[:500]
       suffix = f": {detail}" if detail else ""
-      raise RuntimeError(f"presign returned invalid JSON HTTP {resp.status}{suffix}") from exc
-    if not 200 <= resp.status < 300 or not presign.get("ok"):
+      raise RuntimeError(f"presign returned invalid JSON HTTP {resp.status} for {path}{suffix}") from exc
+    if not 200 <= resp.status < 300 or presign.get("ok") is False:
       detail = str(presign.get("error") or presign.get("message") or text).strip()[:500]
       suffix = f": {detail}" if detail else ""
-      raise RuntimeError(f"presign HTTP {resp.status}{suffix}")
+      raise RuntimeError(f"presign HTTP {resp.status} for {path}{suffix}")
 
   method = str(presign.get("method") or "PUT").upper()
   upload_url = str(presign.get("uploadUrl") or "").strip()
@@ -306,16 +308,12 @@ async def put_file_to_logs_upload(
     raise RuntimeError("presign response missing uploadUrl")
 
   response_headers = presign.get("headers")
-  if not isinstance(response_headers, dict):
-    raise RuntimeError("presign response missing headers")
-  headers = {str(k): str(v) for k, v in response_headers.items() if k and v is not None}
+  headers = {}
+  if isinstance(response_headers, dict):
+    headers = {str(k): str(v) for k, v in response_headers.items() if k and v is not None}
   lower_headers = {k.lower(): v for k, v in headers.items()}
   if "content-type" not in lower_headers:
     headers["Content-Type"] = content_type
-  if "x-amz-meta-path" not in lower_headers:
-    raise RuntimeError("presign response missing required metadata header")
-  if lower_headers.get("x-amz-meta-path") != path:
-    raise RuntimeError("presign metadata path does not match requested path")
   if "content-length" not in lower_headers:
     headers["Content-Length"] = str(file_size)
 
