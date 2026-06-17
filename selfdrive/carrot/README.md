@@ -178,8 +178,228 @@ server/features/dashcam/
 | `catalog.py` | Route/segment listing and metadata. |
 | `ffmpeg.py` | Thumbnail/preview/video processing helpers. |
 | `routes.py` | HTTP route registration and handlers. |
-| `upload.py` | Upload request handling. |
+| `upload.py` | Dashcam upload transports, upload metadata, Discord notification text. |
 | `upload_jobs.py` | Upload job state and progress. |
+
+## Dashcam Segment Log Upload
+
+The dashcam segment upload surface is served by `carrot_server.py` on port
+`7000`. It is exposed in the Logs page through the Dashcam tab, but the backend
+route namespace is still `/api/dashcam/*`. Port `7000` is the local HTTP UI/API
+port; upload transport targets are separate. The current UI has two selected
+segment upload buttons: the existing legacy FTP upload and `선택 전송(Q)` for
+HTTP PUT uploads to `logs.carrotpilot.app`.
+
+### Source And Catalog
+
+- Dashcam route segments live under `/data/media/0/realdata`.
+- Segment names must be flat folder names, contain `--`, and end with a numeric
+  segment index such as `<route-name>--12`.
+- The catalog shown in the UI only lists segment folders that contain a
+  non-empty `qcamera.mp4` or `qcamera.ts`.
+- The route list is cached for 3 seconds and is paged. Route API defaults are
+  `limit=40`, max `200`; per-route segment pages default to `10`, max `2000`.
+- The upload validation path is slightly broader than the catalog path:
+  `/api/dashcam/upload*` accepts any existing segment-like folder below the
+  dashcam root after `safe_segment()` and `segment_dir()` validation. Normal UI
+  selections still come from the catalog, so they have source video.
+- Upload summaries count only the known log artifacts:
+  `qcamera.mp4`, `qcamera.ts`, `rlog.zst`, `rlog.bz2`, `rlog`, `qlog.zst`,
+  `qlog.bz2`, and `qlog`.
+- Actual FTP transfer is recursive over the full selected segment folder using
+  `os.walk()`. This can upload additional files or subdirectories that are not
+  shown in the pre-upload summary.
+
+### User Flow
+
+```text
+Logs page
+  -> Dashcam tab
+  -> expand route or open compact route list
+  -> select segment checkboxes or choose Select all / range
+  -> Upload selected (FTP), 선택 전송(Q) (logs PUT), or per-segment menu -> Upload Logs
+  -> confirmation dialog with segment/file/size summary
+  -> async upload job with progress and Cancel
+  -> result dialog with copyable share text
+```
+
+- `web/js/pages/logs/dashcam.js` owns route rendering, segment selection,
+  upload confirmation, progress dialog, cancel button, result dialog, and job
+  resume.
+- `web/js/pages/logs/shared.js` dispatches route-card clicks:
+  `select-route`, `upload-selected`, `upload-selected-q`, `segment-menu`, and
+  checkbox changes.
+- The active upload job id is stored in `localStorage` as
+  `carrot_dashcam_upload_job_id`; page refresh or revisiting the Logs page will
+  poll and reattach to the running job when the in-memory server job still
+  exists.
+- The client polls upload progress every 850 ms.
+
+### HTTP API
+
+| Endpoint | Method | Purpose |
+|---|---|---|
+| `/api/dashcam/routes` | `GET` | Paged route catalog with the first segment page for each route. |
+| `/api/dashcam/segments/{route}` | `GET` | Paged segment names for a route; used for lazy loading and range/select-all. |
+| `/api/dashcam/upload/summary` | `POST` | Validate target segments and return known artifact sizes before confirmation. |
+| `/api/dashcam/upload/start` | `POST` | Start the normal async upload job. Returns `job_id`. |
+| `/api/dashcam/upload/q/start` | `POST` | Start the `선택 전송(Q)` HTTP PUT upload job. Returns `job_id`. |
+| `/api/dashcam/upload/job?id=<job_id>` | `GET` | Poll job status, progress, log tail, and final result. |
+| `/api/dashcam/upload/cancel` | `POST` | Mark a running job as canceled using `{ "id": "<job_id>" }`. |
+| `/api/dashcam/upload` | `POST` | Direct synchronous upload endpoint for callers that do not need progress polling. |
+
+Upload request bodies accept either:
+
+```json
+{ "segments": ["<route>--0", "<route>--1"] }
+```
+
+or:
+
+```json
+{ "segment": "<route>--0" }
+```
+
+### Validation And Safety
+
+- `safe_segment()` rejects empty names, `/`, `\`, `.`, `..`, and names whose
+  last `--` component is not numeric.
+- `segment_dir()` resolves the absolute path under `DASHCAM_ROOT` and rejects
+  paths that escape the root.
+- The HTTP job wrapper allows only one running dashcam upload job at a time.
+  A second `/api/dashcam/upload/start` or `/api/dashcam/upload/q/start`
+  returns `409` with the running job snapshot.
+- Finished jobs are in-memory only and the newest 12 finished jobs are kept.
+  Restarting `carrot_server.py` loses job history and any resume target.
+- Job logs are kept in memory with a 60000 character tail.
+
+### Legacy FTP Transfer
+
+```text
+local:
+  /data/media/0/realdata/<segment>/
+
+remote:
+  routes/<CarName> <DongleId>/<segment>/
+```
+
+- `upload_jobs.py` builds `remoteBasePath` as `routes/<CarName> <DongleId>/`.
+- `upload.py` connects to the FTP server, logs in, enters the server-side
+  `routes` directory, then creates remote directories one path component at a
+  time.
+- Each selected segment opens its own FTP connection. Parallelism is controlled
+  by `CARROT_FTP_CONCURRENCY`, defaults to `3`, and is clamped to `1..6`.
+- Files are sent with `FTP.storbinary("STOR <filename>", file,
+  blocksize=1024*1024)`.
+- Cancellation is cooperative. The job marks `cancel_requested`; each worker
+  checks before connecting, after login, between directory/file steps, and
+  after each file. A file already inside `storbinary()` is not interrupted until
+  that transfer call returns or fails.
+- Cancel results keep `partial_results` for segments that completed before the
+  cancel was observed.
+
+### Logs PUT Transfer
+
+`선택 전송(Q)` uploads each file with HTTP `PUT`:
+
+```text
+PUT https://logs.carrotpilot.app/upload/routes?path=<CarName%20DongleId%2Fsegment%2Ffile>
+Content-Type: application/octet-stream
+body: raw file bytes
+```
+
+Example remote path shape:
+
+```text
+local:
+  /data/media/0/realdata/<route-name>--1/qlog.bz2
+
+request:
+  https://logs.carrotpilot.app/upload/routes?path=<CarName%20DongleId%2Froute-name--1%2Fqlog.bz2>
+
+decoded path:
+  <CarName> <DongleId>/<route-name>--1/qlog.bz2
+```
+
+- The query `path` value is URL-encoded as one full path string, so `/` becomes
+  `%2F`, matching the curl-style example.
+- The Q upload remote segment directory is the same selected segment folder
+  name used by the legacy FTP upload.
+- The default endpoint is `https://logs.carrotpilot.app/upload/routes` and can
+  be overridden with `CARROT_LOGS_UPLOAD_URL`.
+- Each selected segment runs concurrently with bounded parallelism controlled
+  by `CARROT_LOGS_UPLOAD_CONCURRENCY`, defaults to `3`, and is clamped to
+  `1..6`.
+- Within one segment, files are sent sequentially as separate PUT requests.
+- `segment_upload_files()` recursively walks the full segment directory with
+  `os.walk()`, so Q upload transfers every regular file in the segment folder,
+  including additional files that are not shown in the pre-upload summary.
+- PUT request timeout defaults to 600 seconds per request and can be changed
+  with `CARROT_LOGS_UPLOAD_TIMEOUT`.
+- Q upload does not send the legacy Discord webhook; the result dialog still
+  provides the normal copyable share text.
+
+### Result Payload
+
+Final job results have this shape:
+
+```text
+ok: true only when every result item uploaded successfully
+uploaded: count of successful segments
+total: count of result items
+filesUploaded/filesTotal: present on Q PUT jobs
+uploadedAt: device local timestamp
+uploadMode/uploadUrl: present on Q PUT jobs
+remoteBasePath: routes/<CarName> <DongleId>/ for FTP, logs PUT endpoint/path prefix for Q
+meta: carName, dongleId, serial, branch, commit, commitDate
+results[]: segment, route, segmentIndex, ok, remotePath, files[], optional error
+message: "<uploaded>/<total> uploaded"
+shareText: copyable text summary
+discord: Discord webhook attempt result
+```
+
+- Result item order matches the input segment order even though transfers run
+  concurrently.
+- `ok` can be false while some segments succeeded; failed items carry an
+  `error` string.
+- `shareText` and Discord content show uploaded and failed segment names,
+  metadata, and remote base path. Discord content is shortened to stay under
+  message length limits.
+
+### Metadata And Notifications
+
+- Upload metadata reads `CarName` and `DongleId` from Params, falls back to
+  `none` / `unknown`, and uses `<CarName> <DongleId>` as the device directory.
+- Serial lookup order is Params keys (`HardwareSerial`, `DeviceSerial`,
+  `Serial`, `CarrotSerial`), environment fallback, then
+  `HARDWARE.get_serial()`.
+- Git metadata is read by running git commands in `CARROT_REPO_DIR` or
+  `/data/openpilot`.
+- Discord webhook lookup order is environment variable, Params value, then the
+  obfuscated default in `server/config.py`. Set
+  `CARROT_DISCORD_WEBHOOK_DISABLE=1` to skip the default webhook.
+
+### Dashcam Upload Configuration
+
+| Environment variable | Purpose |
+|---|---|
+| `CARROT_FTP_SERVER` | FTP host, default is the Carrot NAS host in `upload.py`. |
+| `CARROT_FTP_PORT` | FTP port for the NAS upload target. |
+| `CARROT_FTP_USERNAME` | FTP username. |
+| `CARROT_FTP_PASSWORD` | FTP password; prefer setting this in the runtime environment rather than copying secrets into docs. |
+| `CARROT_FTP_CONCURRENCY` | Parallel segment uploads, clamped to `1..6`, default `3`. |
+| `CARROT_LOGS_UPLOAD_URL` | Q upload endpoint, default `https://logs.carrotpilot.app/upload/routes`. |
+| `CARROT_LOGS_UPLOAD_CONCURRENCY` | Parallel Q segment uploads, clamped to `1..6`, default `3`. |
+| `CARROT_LOGS_UPLOAD_TIMEOUT` | Per-file Q PUT timeout in seconds, default `600`, minimum `30`. |
+| `CARROT_REPO_DIR` | Repository path used when collecting git metadata. |
+| `CARROT_DEVICE_SERIAL`, `DEVICE_SERIAL`, `SERIAL` | Serial fallbacks before `HARDWARE.get_serial()`. |
+| `CARROT_DISCORD_WEBHOOK_URL`, `DISCORD_WEBHOOK_URL` | Optional Discord webhook override. |
+| `CARROT_DISCORD_WEBHOOK_DISABLE` | Disable the default Discord webhook when truthy. |
+
+Do not confuse this dashcam segment upload path with the older `carrot_man.py`
+`send_tmux()` FTP helper. That older helper uploads captured tmux/settings files
+under a branch-and-device directory, while dashcam upload sends selected route
+segments through the port `7000` Carrot Web Logs page.
 
 ## Screenrecord Backend
 

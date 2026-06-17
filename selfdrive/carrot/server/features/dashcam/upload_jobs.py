@@ -7,6 +7,8 @@ import uuid
 from datetime import datetime
 from typing import Any
 
+from aiohttp import ClientSession, ClientTimeout
+
 from ...services.params import HAS_PARAMS, Params
 from . import upload
 from .catalog import segment_file_summary
@@ -144,12 +146,12 @@ def prune() -> None:
     _jobs.pop(old["id"], None)
 
 
-def create_job(segments: list[str]) -> dict[str, Any]:
+def create_job(segments: list[str], action: str = "dashcam_upload") -> dict[str, Any]:
   job_id = uuid.uuid4().hex[:12]
   now = time.time()
   job = {
     "id": job_id,
-    "action": "dashcam_upload",
+    "action": action,
     "segments": list(segments),
     "status": "running",
     "log": "",
@@ -274,6 +276,130 @@ async def run_upload_segments(segments: list[str], job: dict[str, Any] | None = 
   return response_payload
 
 
+async def run_logs_put_upload_segments(segments: list[str], job: dict[str, Any] | None = None) -> dict[str, Any]:
+  params = Params() if HAS_PARAMS else None
+  meta = upload.upload_metadata(params)
+  car_selected = meta.get("carName") or "none"
+  dongle_id = meta.get("dongleId") or "unknown"
+  directory = f"{car_selected} {dongle_id}".strip()
+  base_url = upload.logs_upload_url()
+  remote_base_path = upload.logs_upload_url_for_path(f"{directory}/".replace("\\", "/"), base_url)
+  total = len(segments)
+  results: list[Any] = [None] * total
+
+  if job:
+    job["upload_meta"] = meta
+    job["remote_base_path"] = remote_base_path
+    job["partial_results"] = []
+    progress(job, message="Preparing Q upload", current=0, total=total, percent=0)
+
+  ensure_not_canceled(job)
+
+  try:
+    concurrency = max(1, min(6, int(os.environ.get("CARROT_LOGS_UPLOAD_CONCURRENCY", "3") or "3")))
+  except Exception:
+    concurrency = 3
+  sem = asyncio.Semaphore(concurrency)
+  completed = 0
+  files_uploaded = 0
+  files_total = 0
+  timeout_seconds = upload.logs_upload_timeout_seconds()
+  timeout = ClientTimeout(total=timeout_seconds, sock_connect=20, sock_read=timeout_seconds)
+
+  async with ClientSession(timeout=timeout) as session:
+    async def upload_one(idx0: int, segment: str) -> None:
+      nonlocal completed, files_uploaded, files_total
+      idx = idx0 + 1
+      files: list[dict[str, Any]] = []
+      async with sem:
+        if is_cancel_requested(job):
+          return
+        if job:
+          append(job, f"[{idx}/{total}] {segment} Q PUT")
+        try:
+          segment_path = segment_dir(segment)
+          manifest = await asyncio.to_thread(upload.segment_upload_files, segment_path)
+          files_total += len(manifest)
+          files = [
+            {
+              "name": item.get("name"),
+              "size": item.get("size"),
+              "sizeLabel": item.get("sizeLabel"),
+            }
+            for item in manifest
+          ]
+          for item in manifest:
+            ensure_not_canceled(job)
+            name = str(item.get("name") or "").strip()
+            local_path = str(item.get("path") or "")
+            if not name or not local_path:
+              continue
+            remote_file_path = f"{directory}/{segment}/{name}".replace("\\", "/")
+            await upload.put_file_to_logs_upload(
+              local_path,
+              remote_file_path,
+              session,
+              base_url=base_url,
+              should_cancel=(lambda: is_cancel_requested(job)) if job else None,
+            )
+            files_uploaded += 1
+          results[idx0] = {
+            "segment": segment,
+            "route": route_name(segment),
+            "segmentIndex": segment_index(segment),
+            "ok": True,
+            "uploadMode": "logs_put",
+            "remotePath": upload.logs_upload_url_for_path(f"{directory}/{segment}/".replace("\\", "/"), base_url),
+            "files": files,
+          }
+          if job:
+            append(job, f"[{idx}/{total}] {segment} Q PUT OK ({len(files)} files)")
+        except Exception as e:
+          if is_cancel_requested(job):
+            return
+          results[idx0] = {
+            "segment": segment,
+            "route": route_name(segment),
+            "segmentIndex": segment_index(segment),
+            "ok": False,
+            "uploadMode": "logs_put",
+            "remotePath": upload.logs_upload_url_for_path(f"{directory}/{segment}/".replace("\\", "/"), base_url),
+            "files": files,
+            "error": str(e),
+          }
+          if job:
+            append(job, f"[{idx}/{total}] {segment} Q PUT FAILED: {e}")
+      completed += 1
+      if job:
+        job["partial_results"] = [r for r in results if r is not None]
+        job["files_uploaded"] = files_uploaded
+        job["files_total"] = files_total
+        progress(job, message=f"Q uploaded {completed}/{total}", current=completed, total=total)
+
+    await asyncio.gather(*(upload_one(i, seg) for i, seg in enumerate(segments)))
+
+  ensure_not_canceled(job)
+  results = [r for r in results if r is not None]
+  ok_count = sum(1 for item in results if item["ok"])
+  uploaded_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+  response_payload = {
+    "ok": ok_count == len(results),
+    "uploaded": ok_count,
+    "total": len(results),
+    "filesUploaded": files_uploaded,
+    "filesTotal": files_total,
+    "uploadedAt": uploaded_at,
+    "uploadMode": "logs_put",
+    "uploadUrl": base_url,
+    "remoteBasePath": remote_base_path,
+    "meta": meta,
+    "results": results,
+    "message": f"{ok_count}/{len(results)} uploaded",
+  }
+  response_payload["shareText"] = upload.upload_share_text(response_payload)
+  return response_payload
+
+
 async def run_job(job: dict[str, Any]) -> None:
   try:
     result = await run_upload_segments(list(job.get("segments") or []), job)
@@ -298,6 +424,40 @@ async def run_job(job: dict[str, Any]) -> None:
     result["shareText"] = upload.upload_share_text(result)
     append(job, "CANCELED")
     progress(job, message="Upload canceled", percent=0)
+    finish(job, ok=False, result=result, error=str(exc), status="canceled")
+  except Exception as exc:
+    result = {"ok": False, "error": str(exc)}
+    append(job, f"FAILED: {exc}")
+    finish(job, ok=False, result=result, error=str(exc))
+
+
+async def run_logs_put_job(job: dict[str, Any]) -> None:
+  try:
+    result = await run_logs_put_upload_segments(list(job.get("segments") or []), job)
+    finish(job, ok=bool(result.get("ok")), result=result)
+  except UploadCanceled as exc:
+    results = list(job.get("partial_results") or [])
+    uploaded_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    ok_count = sum(1 for item in results if item.get("ok"))
+    total = len(job.get("segments") or [])
+    result = {
+      "ok": False,
+      "canceled": True,
+      "uploaded": ok_count,
+      "total": total,
+      "filesUploaded": int(job.get("files_uploaded") or 0),
+      "filesTotal": int(job.get("files_total") or 0),
+      "uploadedAt": uploaded_at,
+      "uploadMode": "logs_put",
+      "remoteBasePath": job.get("remote_base_path") or "",
+      "meta": job.get("upload_meta") or {},
+      "results": results,
+      "message": f"Canceled {ok_count}/{total}",
+      "error": str(exc),
+    }
+    result["shareText"] = upload.upload_share_text(result)
+    append(job, "CANCELED")
+    progress(job, message="Q upload canceled", percent=0)
     finish(job, ok=False, result=result, error=str(exc), status="canceled")
   except Exception as exc:
     result = {"ok": False, "error": str(exc)}

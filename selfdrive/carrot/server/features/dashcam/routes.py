@@ -255,6 +255,26 @@ async def api_dashcam_upload_start(request: web.Request) -> web.Response:
     return web.json_response({"ok": False, "error": str(e)}, status=500)
 
 
+async def api_dashcam_upload_q_start(request: web.Request) -> web.Response:
+  try:
+    segments = await request_upload_segments(request)
+    running = upload_jobs.running_job()
+    if running:
+      return web.json_response({
+        "ok": False,
+        "error": "upload already running",
+        "job_id": running.get("id"),
+        "job": upload_jobs.snapshot(running),
+      }, status=409)
+    job = upload_jobs.create_job(segments, action="dashcam_upload_q")
+    asyncio.create_task(upload_jobs.run_logs_put_job(job))
+    return web.json_response({"ok": True, "job_id": job["id"], "status": job["status"]})
+  except web.HTTPException as e:
+    return web.json_response({"ok": False, "error": e.text or e.reason}, status=e.status)
+  except Exception as e:
+    return web.json_response({"ok": False, "error": str(e)}, status=500)
+
+
 async def api_dashcam_upload_job(request: web.Request) -> web.Response:
   job_id = (request.query.get("id") or request.match_info.get("job_id") or "").strip()
   if not job_id:
@@ -287,6 +307,7 @@ def register(app: web.Application) -> None:
   app.router.add_get("/api/dashcam/download/{segment}/{kind}", api_dashcam_download)
   app.router.add_post("/api/dashcam/upload/summary", api_dashcam_upload_summary)
   app.router.add_post("/api/dashcam/upload/start", api_dashcam_upload_start)
+  app.router.add_post("/api/dashcam/upload/q/start", api_dashcam_upload_q_start)
   app.router.add_get("/api/dashcam/upload/job", api_dashcam_upload_job)
   app.router.add_post("/api/dashcam/upload/cancel", api_dashcam_upload_cancel)
   app.router.add_post("/api/dashcam/upload", api_dashcam_upload)

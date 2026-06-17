@@ -576,6 +576,7 @@ function dashcamRouteCardHtml(entry, index = 0, options = {}) {
           <span class="dashcam-selection-count">${escapeHtml(getUIText("selected_count", "{count} selected", { count: selected.length }))}</span>
           <button class="smallBtn" type="button" data-action="select-route" data-route="${routeAttr}" data-selected="${allSelected ? "1" : "0"}">${escapeHtml(selectLabel)}</button>
           <button class="smallBtn btn--filled" type="button" data-action="upload-selected" data-route="${routeAttr}" ${selected.length ? "" : "disabled"}>${escapeHtml(getUIText("upload_selected", "Upload selected"))}</button>
+          <button class="smallBtn btn--filled" type="button" data-action="upload-selected-q" data-route="${routeAttr}" ${selected.length ? "" : "disabled"}>${escapeHtml(getUIText("upload_selected_q", "선택 전송(Q)"))}</button>
           <button class="smallBtn dashcam-group-menu-btn" type="button" data-action="route-menu" data-route="${routeAttr}" aria-label="${escapeHtml(getUIText("group_menu", "Group menu"))}" title="${escapeHtml(getUIText("group_menu", "Group menu"))}">
             <svg viewBox="0 0 24 24"><path fill="currentColor" d="M6 10c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2m12 0c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2m-6 0c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2"/></svg>
           </button>
@@ -687,6 +688,8 @@ function updateDashcamRouteSelectionUi(route) {
 
   const uploadBtn = card.querySelector('[data-action="upload-selected"]');
   if (uploadBtn) uploadBtn.disabled = selected.length === 0;
+  const uploadQBtn = card.querySelector('[data-action="upload-selected-q"]');
+  if (uploadQBtn) uploadQBtn.disabled = selected.length === 0;
 
   card.querySelectorAll('input[data-action="select-segment"]').forEach((input) => {
     const segment = input.dataset.segment || "";
@@ -1178,7 +1181,12 @@ async function resumeDashcamUploadJobIfNeeded() {
   return dashcamUploadResumePromise;
 }
 
-async function uploadDashcamSegments(segments) {
+async function uploadDashcamSegments(segments, options = {}) {
+  const isQUpload = options.mode === "logs_put" || options.q === true;
+  const uploadTitle = isQUpload
+    ? getUIText("log_upload_q", "선택 전송(Q)")
+    : getUIText("log_upload", "Upload Logs");
+  const startEndpoint = isQUpload ? "/api/dashcam/upload/q/start" : "/api/dashcam/upload/start";
   const existingJobId = dashcamUploadActiveJobId || getRememberedDashcamUploadJob();
   if (existingJobId) {
     showAppToast(getUIText("upload_already_running", "Upload already running."), { tone: "error", duration: 3200 });
@@ -1196,12 +1204,15 @@ async function uploadDashcamSegments(segments) {
     const summary = await postJson("/api/dashcam/upload/summary", { segments: targets });
     if (Array.isArray(summary?.summaries)) uploadStats = dashcamUploadStats(summary.summaries);
   } catch {}
+  const confirmLead = isQUpload
+    ? getUIText("log_upload_q_confirm", "선택한 {count}개 세그먼트를 logs.carrotpilot.app로 전송할까요?", { count: targets.length })
+    : getUIText("log_upload_confirm", `Upload ${targets.length} logs to the Carrot server?`, { count: targets.length });
   const confirmMessage = [
-    getUIText("log_upload_confirm", `Upload ${targets.length} logs to the Carrot server?`, { count: targets.length }),
+    confirmLead,
     dashcamUploadSummaryLabel(uploadStats),
     getUIText("upload_data_warning", "This upload may use mobile data depending on your network connection."),
   ].join("\n\n");
-  const ok = await appConfirm(confirmMessage, { title: getUIText("log_upload", "Upload Logs") });
+  const ok = await appConfirm(confirmMessage, { title: uploadTitle });
   if (!ok) return;
   let cancelRequested = false;
   const progress = openDashcamUploadProgress(targets.length, uploadStats, {
@@ -1215,13 +1226,13 @@ async function uploadDashcamSegments(segments) {
     },
   });
   let activityId = typeof beginAppActivity === "function"
-    ? beginAppActivity("logs", getUIText("log_uploading", "Uploading logs"))
+    ? beginAppActivity("logs", uploadTitle)
     : null;
   let jobId = null;
   try {
     progress.setMessage(`0/${targets.length} · ${getUIText("log_uploading", "Uploading logs")}`);
     if (cancelRequested) throw makeDashcamUploadCanceledError();
-    const started = await postJson("/api/dashcam/upload/start", { segments: targets });
+    const started = await postJson(startEndpoint, { segments: targets });
     jobId = started.job_id;
     rememberDashcamUploadJob(jobId);
     if (cancelRequested) {
@@ -1255,12 +1266,16 @@ async function uploadDashcamSegments(segments) {
     } else if (isDashcamUploadCanceledError(e)) {
       if (!cancelRequested) showAppToast(getUIText("upload_canceled", "Upload canceled"), { duration: 2600 });
     } else {
-      showAppToast(`${getUIText("log_upload", "Upload Logs")} ${getUIText("error", "Error")}: ${e.message || e}`, { tone: "error", duration: 4200 });
+      showAppToast(`${uploadTitle} ${getUIText("error", "Error")}: ${e.message || e}`, { tone: "error", duration: 4200 });
     }
   } finally {
     if (activityId && typeof endAppActivity === "function") endAppActivity(activityId);
     if (jobId && dashcamUploadActiveJobId === jobId) dashcamUploadActiveJobId = null;
   }
+}
+
+async function uploadDashcamSegmentsQ(segments) {
+  return uploadDashcamSegments(segments, { mode: "logs_put" });
 }
 
 async function showDashcamSegmentMenu(route, segment) {

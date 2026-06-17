@@ -374,6 +374,10 @@ function bindLogsPage() {
         const entry = dashcamState.routes.find((item) => item.route === route);
         const targets = dashcamSelectedForRoute(entry || { segmentFolders: [] });
         uploadDashcamSegments(targets).catch(() => {});
+      } else if (action === "upload-selected-q") {
+        const entry = dashcamState.routes.find((item) => item.route === route);
+        const targets = dashcamSelectedForRoute(entry || { segmentFolders: [] });
+        uploadDashcamSegmentsQ(targets).catch(() => {});
       }
     });
     routesHost.addEventListener("change", (ev) => {

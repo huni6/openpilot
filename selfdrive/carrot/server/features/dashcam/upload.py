@@ -1,14 +1,20 @@
+import asyncio
 import base64
 import os
 import subprocess
 from ftplib import FTP
 from typing import Any, Callable
+from urllib.parse import quote
 
 from aiohttp import ClientSession, ClientTimeout
 
 from openpilot.system.hardware import HARDWARE
 
 from ...config import DASHCAM_DEFAULT_DISCORD_KEY, DASHCAM_DEFAULT_DISCORD_WEBHOOK
+from .paths import file_size_label
+
+
+LOGS_UPLOAD_URL_DEFAULT = "https://logs.carrotpilot.app/upload/routes"
 
 
 def param_text(params: Any, key: str, default: str = "unknown") -> str:
@@ -184,6 +190,94 @@ async def send_discord_webhook(url: str, payload: dict[str, Any]) -> dict[str, A
         return {"configured": True, "ok": False, "status": resp.status, "error": text[:500]}
   except Exception as e:
     return {"configured": True, "ok": False, "error": str(e)}
+
+
+def segment_upload_files(local_folder: str) -> list[dict[str, Any]]:
+  out: list[dict[str, Any]] = []
+  for root, dirnames, files in os.walk(local_folder):
+    dirnames.sort()
+    for filename in sorted(files):
+      local_path = os.path.join(root, filename)
+      if not os.path.isfile(local_path):
+        continue
+      rel_path = os.path.relpath(local_path, local_folder).replace(os.sep, "/")
+      try:
+        size = os.path.getsize(local_path)
+      except OSError:
+        size = 0
+      out.append({
+        "name": rel_path,
+        "path": local_path,
+        "size": size,
+        "sizeLabel": file_size_label(size),
+      })
+  return out
+
+
+def logs_upload_url() -> str:
+  return (os.environ.get("CARROT_LOGS_UPLOAD_URL", LOGS_UPLOAD_URL_DEFAULT) or LOGS_UPLOAD_URL_DEFAULT).strip()
+
+
+def logs_upload_url_for_path(remote_path: str, base_url: str | None = None) -> str:
+  endpoint = (base_url or logs_upload_url()).strip() or LOGS_UPLOAD_URL_DEFAULT
+  separator = "&" if "?" in endpoint else "?"
+  return f"{endpoint}{separator}path={quote(remote_path, safe='')}"
+
+
+def logs_upload_put_url(remote_path: str, base_url: str | None = None) -> str:
+  return logs_upload_url_for_path(remote_path.strip("/"), base_url)
+
+
+def logs_upload_timeout_seconds() -> float:
+  try:
+    return max(30.0, float(os.environ.get("CARROT_LOGS_UPLOAD_TIMEOUT", "600") or "600"))
+  except Exception:
+    return 600.0
+
+
+async def put_file_to_logs_upload(
+  local_path: str,
+  remote_path: str,
+  session: ClientSession,
+  *,
+  base_url: str | None = None,
+  should_cancel: Callable[[], bool] | None = None,
+) -> dict[str, Any]:
+  def check_cancel() -> None:
+    if should_cancel and should_cancel():
+      raise RuntimeError("upload canceled")
+
+  check_cancel()
+  url = logs_upload_put_url(remote_path, base_url)
+
+  async def file_chunks():
+    with open(local_path, "rb") as f:
+      while True:
+        check_cancel()
+        chunk = await asyncio.to_thread(f.read, 1024 * 1024)
+        if not chunk:
+          break
+        yield chunk
+
+  headers = {"Content-Type": "application/octet-stream"}
+  try:
+    headers["Content-Length"] = str(os.path.getsize(local_path))
+  except OSError:
+    pass
+
+  check_cancel()
+  async with session.put(
+    url,
+    data=file_chunks(),
+    headers=headers,
+  ) as resp:
+    if not 200 <= resp.status < 300:
+      text = await resp.text()
+      detail = text.strip()[:500]
+      suffix = f": {detail}" if detail else ""
+      raise RuntimeError(f"HTTP {resp.status}{suffix}")
+    check_cancel()
+  return {"ok": True, "url": url}
 
 
 def upload_folder_to_ftp(
