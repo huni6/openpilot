@@ -237,10 +237,10 @@ def logs_upload_timeout_seconds() -> float:
 
 def logs_upload_chunk_size() -> int:
   try:
-    size = int(os.environ.get("CARROT_LOGS_UPLOAD_CHUNK_SIZE", str(4 * 1024 * 1024)) or str(4 * 1024 * 1024))
+    size = int(os.environ.get("CARROT_LOGS_UPLOAD_CHUNK_SIZE", str(50 * 1024 * 1024)) or str(50 * 1024 * 1024))
   except Exception:
-    size = 4 * 1024 * 1024
-  return max(1024 * 1024, min(16 * 1024 * 1024, size))
+    size = 50 * 1024 * 1024
+  return max(1024 * 1024, min(50 * 1024 * 1024, size))
 
 
 async def put_file_to_logs_upload(
