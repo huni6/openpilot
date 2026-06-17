@@ -235,6 +235,14 @@ def logs_upload_timeout_seconds() -> float:
     return 600.0
 
 
+def logs_upload_chunk_size() -> int:
+  try:
+    size = int(os.environ.get("CARROT_LOGS_UPLOAD_CHUNK_SIZE", str(4 * 1024 * 1024)) or str(4 * 1024 * 1024))
+  except Exception:
+    size = 4 * 1024 * 1024
+  return max(1024 * 1024, min(16 * 1024 * 1024, size))
+
+
 async def put_file_to_logs_upload(
   local_path: str,
   remote_path: str,
@@ -250,12 +258,13 @@ async def put_file_to_logs_upload(
 
   check_cancel()
   url = logs_upload_put_url(remote_path, base_url)
+  chunk_size = logs_upload_chunk_size()
 
   async def file_chunks():
     with open(local_path, "rb") as f:
       while True:
         check_cancel()
-        chunk = await asyncio.to_thread(f.read, 1024 * 1024)
+        chunk = await asyncio.to_thread(f.read, chunk_size)
         if not chunk:
           break
         if on_progress:

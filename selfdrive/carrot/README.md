@@ -238,6 +238,9 @@ Logs page
   based on completed segment bytes, while Q upload updates byte counters as
   each PUT request streams file chunks. When files are currently being sent,
   the popup also lists each active file with its own percent and byte progress.
+  Upload workers keep progress updates off the hot path by publishing job
+  progress at most every 0.5 seconds or every 8 MB, except file start/finish
+  events which publish immediately.
 
 ### HTTP API
 
@@ -335,6 +338,8 @@ decoded path:
   by `CARROT_LOGS_UPLOAD_CONCURRENCY`, defaults to `3`, and is clamped to
   `1..6`.
 - Within one segment, files are sent sequentially as separate PUT requests.
+- Q upload streams files in chunks controlled by `CARROT_LOGS_UPLOAD_CHUNK_SIZE`,
+  default `4 MiB`, clamped to `1..16 MiB`.
 - `segment_upload_files()` recursively walks the full segment directory with
   `os.walk()`, so Q upload transfers every regular file in the segment folder,
   including additional files that are not shown in the pre-upload summary.
@@ -354,6 +359,7 @@ total: count of result items
 filesUploaded/filesTotal: present on Q PUT jobs
 bytesUploaded/bytesTotal: present on upload jobs for progress metrics
 active_files[]: in-progress file rows while a job is running
+elapsedSeconds: job wall time, shown next to the completed file/size summary
 uploadedAt: device local timestamp
 uploadMode/uploadUrl: present on Q PUT jobs
 remoteBasePath: routes/<CarName> <DongleId>/ for FTP, logs PUT endpoint/path prefix for Q
@@ -368,6 +374,8 @@ discord: Discord webhook attempt result
   concurrently.
 - `ok` can be false while some segments succeeded; failed items carry an
   `error` string.
+- The result dialog prefers `filesUploaded` and `bytesUploaded` for the
+  completed file/size summary, then appends `elapsedSeconds`.
 - `shareText` and Discord content show uploaded and failed segment names,
   metadata, and remote base path. Discord content is shortened to stay under
   message length limits.
@@ -397,6 +405,7 @@ discord: Discord webhook attempt result
 | `CARROT_LOGS_UPLOAD_URL` | Q upload endpoint, default `https://logs.carrotpilot.app/upload/routes`. |
 | `CARROT_LOGS_UPLOAD_CONCURRENCY` | Parallel Q segment uploads, clamped to `1..6`, default `3`. |
 | `CARROT_LOGS_UPLOAD_TIMEOUT` | Per-file Q PUT timeout in seconds, default `600`, minimum `30`. |
+| `CARROT_LOGS_UPLOAD_CHUNK_SIZE` | Q PUT read chunk size in bytes, clamped to `1..16 MiB`, default `4 MiB`. |
 | `CARROT_REPO_DIR` | Repository path used when collecting git metadata. |
 | `CARROT_DEVICE_SERIAL`, `DEVICE_SERIAL`, `SERIAL` | Serial fallbacks before `HARDWARE.get_serial()`. |
 | `CARROT_DISCORD_WEBHOOK_URL`, `DISCORD_WEBHOOK_URL` | Optional Discord webhook override. |

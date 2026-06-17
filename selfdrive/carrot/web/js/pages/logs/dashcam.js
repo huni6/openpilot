@@ -925,14 +925,28 @@ function dashcamUploadStats(items) {
   }, { segments: 0, files: 0, bytes: 0 });
 }
 
-function dashcamUploadSummaryLabel(stats) {
+function dashcamUploadCompletedStats(result) {
+  const stats = dashcamUploadStats(result?.results || []);
+  const filesUploaded = Number(result?.filesUploaded);
+  const bytesUploaded = Number(result?.bytesUploaded);
+  if (Number.isFinite(filesUploaded) && filesUploaded > 0) stats.files = filesUploaded;
+  if (Number.isFinite(bytesUploaded) && bytesUploaded > 0) stats.bytes = bytesUploaded;
+  return stats;
+}
+
+function dashcamUploadSummaryLabel(stats, options = {}) {
   const fileCount = Number(stats?.files || 0);
   const bytes = Number(stats?.bytes || 0);
   const fileLabel = fileCount > 0
     ? getUIText("upload_file_count", "{count} files", { count: fileCount })
     : getUIText("upload_files_unknown", "files unknown");
   const sizeLabel = bytes > 0 ? formatLogBytes(bytes) : getUIText("upload_size_unknown", "size unknown");
-  return `${fileLabel} · ${sizeLabel}`;
+  const parts = [fileLabel, sizeLabel];
+  const elapsedSeconds = Number(options?.elapsedSeconds);
+  if (Number.isFinite(elapsedSeconds) && elapsedSeconds >= 0) {
+    parts.push(`${getUIText("upload_elapsed", "경과")} ${dashcamUploadDurationLabel(elapsedSeconds)}`);
+  }
+  return parts.join(" / ");
 }
 
 function dashcamUploadDurationLabel(seconds) {
@@ -1008,11 +1022,11 @@ function dashcamUploadActiveFileHtml(file) {
 
 function dashcamUploadResultHtml(result) {
   const text = String(result?.shareText || result?.message || "");
-  const stats = dashcamUploadStats(result?.results || []);
+  const stats = dashcamUploadCompletedStats(result);
   return `<div class="dashcam-share-card">
     <div class="dashcam-share-card__summary">
       <span>${escapeHtml(getUIText("upload_count", "Upload {uploaded}/{total}", { uploaded: Number(result?.uploaded || 0), total: Number(result?.total || 0) }))}</span>
-      <span>${escapeHtml(dashcamUploadSummaryLabel(stats))}</span>
+      <span>${escapeHtml(dashcamUploadSummaryLabel(stats, { elapsedSeconds: result?.elapsedSeconds }))}</span>
     </div>
     <pre>${escapeHtml(text)}</pre>
   </div>`;
@@ -1123,8 +1137,8 @@ function openDashcamUploadProgress(total, stats = null, options = {}) {
       bar.style.transform = "none";
       bar.style.width = `${Math.max(4, Math.min(100, value))}%`;
     },
-    setSummary(nextStats) {
-      if (summary) summary.textContent = nextStats ? dashcamUploadSummaryLabel(nextStats) : "";
+    setSummary(nextStats, nextOptions = {}) {
+      if (summary) summary.textContent = nextStats ? dashcamUploadSummaryLabel(nextStats, nextOptions) : "";
     },
     setMetrics(nextMetrics) {
       if (metricSpeed) metricSpeed.textContent = nextMetrics?.speed || "-";
@@ -1259,7 +1273,7 @@ async function resumeDashcamUploadJobIfNeeded() {
       clearRememberedDashcamUploadJob(jobId);
       progress.setMessage(`${Number(result.uploaded || 0)}/${Number(result.total || total)}`);
       progress.setProgress(100);
-      progress.setSummary(dashcamUploadStats(result.results || []));
+      progress.setSummary(dashcamUploadCompletedStats(result), { elapsedSeconds: result.elapsedSeconds });
       showAppToast(result.message || getUIText("upload_complete_count", "Upload complete {uploaded}/{total}", {
         uploaded: result.uploaded || 0,
         total: result.total || total,
@@ -1357,7 +1371,7 @@ async function uploadDashcamSegments(segments, options = {}) {
     clearRememberedDashcamUploadJob(jobId);
     progress.setMessage(`${Number(result.uploaded || 0)}/${Number(result.total || targets.length)}`);
     progress.setProgress(100);
-    progress.setSummary(dashcamUploadStats(result.results || []));
+    progress.setSummary(dashcamUploadCompletedStats(result), { elapsedSeconds: result.elapsedSeconds });
     const message = result.message || getUIText("upload_complete_count", "Upload complete {uploaded}/{total}", {
       uploaded: result.uploaded || 0,
       total: result.total || targets.length,
