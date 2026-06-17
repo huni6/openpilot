@@ -337,12 +337,15 @@ decoded path:
 - Each selected segment runs concurrently with bounded parallelism controlled
   by `CARROT_LOGS_UPLOAD_CONCURRENCY`, defaults to `3`, and is clamped to
   `1..6`.
-- Within one segment, files are sent sequentially as separate PUT requests.
+- Within one segment, files are sent concurrently as separate PUT requests.
+  With the default 3 concurrent segments and 3 files per segment, Q upload can
+  have up to about 9 active PUT file transfers.
 - Q upload streams files in chunks controlled by `CARROT_LOGS_UPLOAD_CHUNK_SIZE`,
   default `4 MiB`, clamped to `1..16 MiB`.
-- `segment_upload_files()` recursively walks the full segment directory with
-  `os.walk()`, so Q upload transfers every regular file in the segment folder,
-  including additional files that are not shown in the pre-upload summary.
+- Q upload uses the same known artifact list as the pre-upload summary:
+  `qcamera.mp4`, `qcamera.ts`, `rlog.zst`, `rlog.bz2`, `rlog`, `qlog.zst`,
+  `qlog.bz2`, and `qlog`. It does not upload arbitrary extra files from the
+  segment folder.
 - PUT request timeout defaults to 600 seconds per request and can be changed
   with `CARROT_LOGS_UPLOAD_TIMEOUT`.
 - Q upload does not send the legacy Discord webhook; the result dialog still

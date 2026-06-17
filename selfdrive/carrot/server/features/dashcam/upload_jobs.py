@@ -448,7 +448,15 @@ async def run_logs_put_upload_segments(segments: list[str], job: dict[str, Any] 
           append(job, f"[{idx}/{total}] {segment} Q PUT")
         try:
           segment_path = segment_dir(segment)
-          manifest = await asyncio.to_thread(upload.segment_upload_files, segment_path)
+          summary_files = await asyncio.to_thread(segment_file_summary, segment_path)
+          manifest = [
+            {
+              **item,
+              "path": os.path.join(segment_path, str(item.get("name") or "")),
+            }
+            for item in summary_files
+            if item.get("name")
+          ]
           tracker.add_totals(sum(int(item.get("size") or 0) for item in manifest), len(manifest))
           files = [
             {
@@ -458,14 +466,14 @@ async def run_logs_put_upload_segments(segments: list[str], job: dict[str, Any] 
             }
             for item in manifest
           ]
-          for item in manifest:
+          async def upload_file(file_idx: int, item: dict[str, Any]) -> Exception | None:
             ensure_not_canceled(job)
             name = str(item.get("name") or "").strip()
             local_path = str(item.get("path") or "")
             if not name or not local_path:
-              continue
+              return None
             remote_file_path = f"{directory}/{segment}/{name}".replace("\\", "/")
-            active_key = f"put:{idx0}"
+            active_key = f"put:{idx0}:{file_idx}"
             file_size = int(item.get("size") or 0)
             file_sent = 0
             tracker.start_file(active_key, segment=segment, name=name, size=file_size, mode="logs_put")
@@ -487,8 +495,16 @@ async def run_logs_put_upload_segments(segments: list[str], job: dict[str, Any] 
               )
             except Exception:
               tracker.clear_file(active_key)
-              raise
+              return e
             tracker.finish_file(active_key)
+            return None
+
+          file_errors = await asyncio.gather(
+            *(upload_file(file_idx, item) for file_idx, item in enumerate(manifest)),
+          )
+          errors = [err for err in file_errors if err is not None]
+          if errors:
+            raise errors[0]
           results[idx0] = {
             "segment": segment,
             "route": route_name(segment),
