@@ -18,6 +18,7 @@ from .paths import file_size_label
 LOGS_UPLOAD_URL_DEFAULT = "https://logs.carrotpilot.app/upload/routes"
 LOGS_UPLOAD_CONTENT_TYPE_DEFAULT = "application/octet-stream"
 LOGS_UPLOAD_MAX_FILE_SIZE = 40 * 1024 * 1024
+LOGS_UPLOAD_ACCEPT_ENCODING = "identity"
 
 
 def param_text(params: Any, key: str, default: str = "unknown") -> str:
@@ -285,7 +286,10 @@ async def put_file_to_logs_upload(
   check_cancel()
   async with session.post(
     presign_url,
-    headers={"Content-Type": content_type},
+    headers={
+      "Accept-Encoding": LOGS_UPLOAD_ACCEPT_ENCODING,
+      "Content-Type": content_type,
+    },
     allow_redirects=False,
   ) as resp:
     text = await resp.text()
@@ -310,12 +314,16 @@ async def put_file_to_logs_upload(
   response_headers = presign.get("headers")
   headers = {}
   if isinstance(response_headers, dict):
-    headers = {str(k): str(v) for k, v in response_headers.items() if k and v is not None}
-  lower_headers = {k.lower(): v for k, v in headers.items()}
-  if "content-type" not in lower_headers:
-    headers["Content-Type"] = content_type
-  if "content-length" not in lower_headers:
-    headers["Content-Length"] = str(file_size)
+    for k, v in response_headers.items():
+      if not k or v is None:
+        continue
+      key = str(k)
+      if key.lower() in ("accept-encoding", "content-encoding", "content-length", "content-type"):
+        continue
+      headers[key] = str(v)
+  headers["Accept-Encoding"] = LOGS_UPLOAD_ACCEPT_ENCODING
+  headers["Content-Type"] = content_type
+  headers["Content-Length"] = str(file_size)
 
   async def file_chunks():
     with open(local_path, "rb") as f:

@@ -338,6 +338,9 @@ body: raw file bytes
   the server validation contract.
 - The client sends exactly one file per presign request and one file per
   `PUT`; multipart/form-data multi-file uploads are not used.
+- Q upload always sends `Content-Type: application/octet-stream` regardless of
+  file extension. Compressed log files such as `.zst` are still raw binary file
+  bodies, not HTTP content-encoded requests.
 - Each selected segment runs concurrently with bounded parallelism controlled
   by `CARROT_LOGS_UPLOAD_CONCURRENCY`, defaults to `4`, and is clamped to
   `1..10`.
