@@ -3,8 +3,8 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass
 
-DESIGN_WIDTH = 2880
-DESIGN_HEIGHT = 720
+DESIGN_WIDTH = 1920
+DESIGN_HEIGHT = 480
 
 Color3 = tuple[int, int, int]
 Color4 = tuple[int, int, int, int]

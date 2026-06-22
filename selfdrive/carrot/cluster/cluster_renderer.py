@@ -611,6 +611,7 @@ class ClusterUiRenderer:
         profile_total = self._profile_start()
         self.hidden = hidden
         rl.set_trace_log_level(rl.TraceLogLevel.LOG_WARNING)
+        rl.set_config_flags(rl.ConfigFlags.FLAG_MSAA_4X_HINT)
         flags = 0
         if hidden:
             flags |= rl.ConfigFlags.FLAG_WINDOW_HIDDEN
