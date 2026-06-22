@@ -74,8 +74,8 @@ JETBRAINS_MONO_FONT_PATH = OPENPILOT_FONT_DIR / "JetBrainsMono-Medium.ttf"
 
 # ==========================================
 # [수정된 부분] 폴더 충돌 오류 해결 및 EV6/커스텀 아이콘 경로 복구
-VEHICLE_MODEL_PATH = CLUSTER_DIR / "assets" / "models" / "ev6" / "ev6_cluster.obj"
-FOLLOW_VEHICLE_ICON_PATH = SELFDRIVE_DIR / "assets" / "icons_mici" / "carrot_cruse_gap_trimmed.png"
+VEHICLE_MODEL_PATH = Path("none.png")
+FOLLOW_VEHICLE_ICON_PATH = Path("none.png")
 LFA_ICON_PATH = Path("none.png")
 # ==========================================
 
