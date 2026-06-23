@@ -626,6 +626,11 @@ class ClusterUiRenderer:
         rl.set_config_flags(flags)
         profile_stage = self._profile_start()
         rl.init_window(self.width, self.height, self.title)
+        print(
+            f"Cluster renderer open: hidden={hidden} size={self.width}x{self.height} "
+            f"selfdrive={SELFDRIVE_DIR}",
+            flush=True,
+        )
         self._profile_add("renderer.open.init_window", profile_stage)
         if self.target_fps > 0:
             profile_stage = self._profile_start()
@@ -1318,10 +1323,17 @@ class ClusterUiRenderer:
                         rl.gen_texture_mipmaps(font.texture)
                         rl.set_texture_filter(font.texture, rl.TextureFilter.TEXTURE_FILTER_TRILINEAR)
                         self._owns_font = True
+                        print(
+                            f"Cluster font loaded: {candidate} "
+                            f"texture={font.texture.id} size={font.texture.width}x{font.texture.height}",
+                            flush=True,
+                        )
                         return font
+                    print(f"Cluster font invalid texture: {candidate} id={font.texture.id}", flush=True)
                 except Exception as exc:
-                    print(f"Cluster font load failed for {candidate}: {exc}")
+                    print(f"Cluster font load failed for {candidate}: {exc}", flush=True)
         self._owns_font = False
+        print("Cluster font fallback: raylib default font", flush=True)
         return rl.get_font_default()
 
     def _font_candidates(self) -> list[Path]:
@@ -1383,15 +1395,22 @@ class ClusterUiRenderer:
 
     def _load_icon_texture(self, path: Path, label: str):
         if not path.exists():
+            print(f"{label} icon missing: {path}", flush=True)
             return None
         try:
             texture = rl.load_texture(str(path))
             if texture.id <= 0:
+                print(f"{label} icon invalid texture: {path} id={texture.id}", flush=True)
                 return None
             rl.set_texture_filter(texture, rl.TextureFilter.TEXTURE_FILTER_BILINEAR)
+            print(
+                f"{label} icon loaded: {path} "
+                f"texture={texture.id} size={texture.width}x{texture.height}",
+                flush=True,
+            )
             return texture
         except Exception as exc:
-            print(f"{label} icon load failed: {exc}")
+            print(f"{label} icon load failed for {path}: {exc}", flush=True)
             return None
 
     def _load_lfa_active_texture(self):
