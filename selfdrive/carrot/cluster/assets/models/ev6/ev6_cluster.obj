@@ -1,5 +1,5 @@
-# Blender 5.1.2
-# www.blender.org
+# Generated from models/89-cybertruck-final-obj.zip for raylib cluster rendering.
+# Local axes: x=vehicle right, y=vehicle forward, z=vehicle up. Bounds are normalized to width=1, length=1, height=1.
 mtllib ev6_cluster.mtl
 o ev6_cluster
 v -0.337181 0.144875 0.618389
