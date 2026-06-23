@@ -8,6 +8,7 @@ from functools import lru_cache
 import base64
 import math
 import os
+import sys
 import time
 from pathlib import Path
 
@@ -71,8 +72,11 @@ OPENPILOT_FONT_DIR = SELFDRIVE_DIR / "assets" / "fonts"
 OPENPILOT_ADDON_FONT_DIR = SELFDRIVE_DIR / "assets" / "addon" / "font"
 KAIGEN_GOTHIC_KR_BOLD_FONT_PATH = OPENPILOT_FONT_DIR / "KaiGenGothicKR-Bold.ttf"
 JETBRAINS_MONO_FONT_PATH = OPENPILOT_FONT_DIR / "JetBrainsMono-Medium.ttf"
+PRETENDARD_SEMIBOLD_FONT_PATH = OPENPILOT_FONT_DIR / "Pretendard-SemiBold.ttf"
+INTER_BOLD_FONT_PATH = OPENPILOT_FONT_DIR / "Inter-Bold.ttf"
 VEHICLE_MODEL_PATH = CLUSTER_DIR / "assets" / "models" / "ev6" / "ev6_cluster.obj"
 FOLLOW_VEHICLE_ICON_PATH = SELFDRIVE_DIR / "assets" / "icons_mici" / "carrot_cruse_gap_trimmed.png"
+EGO_VEHICLE_ICON_PATH = SELFDRIVE_DIR / "assets" / "icons_mici" / "ego_vehicle_custom.png"
 LFA_ICON_PATH = SELFDRIVE_DIR / "assets" / "icons_mici" / "carrot_wheel_org.png"
 ACCEL_TEXT_WIDTH_SAMPLES = ("+00.00", "-00.00")
 TURN_SIGNAL_LEFT_CENTER_X = 610
@@ -99,8 +103,8 @@ FOLLOW_GAP_BAR_H = 7.7
 FOLLOW_GAP_BAR_R = 1.3
 FOLLOW_GAP_BAR_SCALE = 1.75 * DRIVE_STATUS_SCALE
 FOLLOW_GAP_BAR_STEP_X = 6.3
-FOLLOW_GAP_ICON_ASPECT = 44.0 / 27.5
-FOLLOW_GAP_ICON_H = 32.0 * DRIVE_STATUS_SCALE
+FOLLOW_GAP_ICON_ASPECT = 512.0 / 233.0
+FOLLOW_GAP_ICON_H = 15.0 * DRIVE_STATUS_SCALE
 FOLLOW_GAP_ICON_W = FOLLOW_GAP_ICON_H * FOLLOW_GAP_ICON_ASPECT
 TOP_CRUISE_CENTER_X = FOLLOW_STATUS_CENTER_X + 202
 TOP_CRUISE_FONT_SIZE = 27.0 * DRIVE_STATUS_SCALE
@@ -523,6 +527,8 @@ class ClusterUiRenderer:
         self._owns_font = False
         self._accel_text_width = 0.0
         self._capture_target = None
+        self._window_frame_target = None
+        self._window_frame_target_size: tuple[int, int] | None = None
         self._portrait_upload_target = None
         self._portrait_upload_target_size: tuple[int, int] | None = None
         self._nv12_pack_y_target = None
@@ -536,6 +542,7 @@ class ClusterUiRenderer:
         self._vehicle_model = None
         self._vehicle_model_load_attempted = False
         self._follow_vehicle_texture = None
+        self._ego_vehicle_texture = None
         self._lfa_texture = None
         self._lfa_active_texture = None
         self._navi_guidance_texture = None
@@ -610,14 +617,13 @@ class ClusterUiRenderer:
             return
         profile_total = self._profile_start()
         self.hidden = hidden
-# 하드웨어 자체 안티앨리어싱을 켜서 자글자글한 고해상도 화질 저하 문제 해결
-        rl.set_config_flags(rl.ConfigFlags.FLAG_MSAA_4X_HINT)
+        flags = rl.ConfigFlags.FLAG_MSAA_4X_HINT
+        if sys.platform == "darwin":
+            flags |= rl.ConfigFlags.FLAG_WINDOW_HIGHDPI
         rl.set_trace_log_level(rl.TraceLogLevel.LOG_WARNING)
-        flags = 0
         if hidden:
             flags |= rl.ConfigFlags.FLAG_WINDOW_HIDDEN
-        if flags:
-            rl.set_config_flags(flags)
+        rl.set_config_flags(flags)
         profile_stage = self._profile_start()
         rl.init_window(self.width, self.height, self.title)
         self._profile_add("renderer.open.init_window", profile_stage)
@@ -635,6 +641,9 @@ class ClusterUiRenderer:
         self._load_follow_vehicle_texture()
         self._profile_add("renderer.open.load_follow_vehicle_texture", profile_stage)
         profile_stage = self._profile_start()
+        self._load_ego_vehicle_texture()
+        self._profile_add("renderer.open.load_ego_vehicle_texture", profile_stage)
+        profile_stage = self._profile_start()
         self._load_drive_status_textures()
         self._profile_add("renderer.open.load_drive_status_textures", profile_stage)
         self._window_open = True
@@ -646,6 +655,10 @@ class ClusterUiRenderer:
         if self._capture_target is not None:
             rl.unload_render_texture(self._capture_target)
             self._capture_target = None
+        if self._window_frame_target is not None:
+            rl.unload_render_texture(self._window_frame_target)
+            self._window_frame_target = None
+            self._window_frame_target_size = None
         if self._portrait_upload_target is not None:
             rl.unload_render_texture(self._portrait_upload_target)
             self._portrait_upload_target = None
@@ -675,6 +688,9 @@ class ClusterUiRenderer:
         if self._follow_vehicle_texture is not None:
             rl.unload_texture(self._follow_vehicle_texture)
             self._follow_vehicle_texture = None
+        if self._ego_vehicle_texture is not None:
+            rl.unload_texture(self._ego_vehicle_texture)
+            self._ego_vehicle_texture = None
         if self._lfa_texture is not None:
             rl.unload_texture(self._lfa_texture)
             self._lfa_texture = None
@@ -708,12 +724,61 @@ class ClusterUiRenderer:
         profile_stage = self._profile_start()
         rl.begin_drawing()
         self._profile_add("render_frame.begin_drawing", profile_stage)
-        profile_stage = self._profile_start()
-        self.render(state)
-        self._profile_add("render_frame.render", profile_stage)
-        profile_stage = self._profile_start()
-        rl.end_drawing()
-        self._profile_add("render_frame.end_drawing", profile_stage)
+        try:
+            profile_stage = self._profile_start()
+            if self._render_frame_to_window_target(state):
+                self._profile_add("render_frame.render_window_target", profile_stage)
+            else:
+                self.render(state)
+                self._profile_add("render_frame.render", profile_stage)
+        finally:
+            profile_stage = self._profile_start()
+            rl.end_drawing()
+            self._profile_add("render_frame.end_drawing", profile_stage)
+
+    def _window_frame_render_size(self) -> tuple[int, int] | None:
+        if sys.platform != "darwin" or self.hidden:
+            return None
+        render_width = int(rl.get_render_width())
+        render_height = int(rl.get_render_height())
+        if render_width <= self.width and render_height <= self.height:
+            return None
+        return max(self.width, render_width), max(self.height, render_height)
+
+    def _get_window_frame_target(self, width: int, height: int):
+        target_size = (int(width), int(height))
+        if self._window_frame_target is not None and self._window_frame_target_size != target_size:
+            rl.unload_render_texture(self._window_frame_target)
+            self._window_frame_target = None
+            self._window_frame_target_size = None
+        if self._window_frame_target is None:
+            self._window_frame_target = rl.load_render_texture(target_size[0], target_size[1])
+            self._window_frame_target_size = target_size
+            rl.set_texture_filter(self._window_frame_target.texture, rl.TextureFilter.TEXTURE_FILTER_BILINEAR)
+        return self._window_frame_target
+
+    def _render_frame_to_window_target(self, state: ClusterUiState) -> bool:
+        target_size = self._window_frame_render_size()
+        if target_size is None:
+            return False
+
+        target = self._get_window_frame_target(*target_size)
+        original_width, original_height = self.width, self.height
+        try:
+            self.width, self.height = target_size
+            rl.begin_texture_mode(target)
+            try:
+                self.render(state)
+            finally:
+                rl.end_texture_mode()
+        finally:
+            self.width, self.height = original_width, original_height
+
+        rl.clear_background(rl_color(self._current_theme().bg))
+        source = rl.Rectangle(0.0, 0.0, float(target.texture.width), -float(target.texture.height))
+        dest = rl.Rectangle(0.0, 0.0, float(target_size[0]), float(target_size[1]))
+        rl.draw_texture_pro(target.texture, source, dest, rl.Vector2(0.0, 0.0), 0.0, rl_color(WHITE))
+        return True
 
     def render(self, state: ClusterUiState, signal_lights: tuple[bool, bool] | None = None) -> None:
         """Draw one frame into the currently active raylib render target."""
@@ -1261,10 +1326,14 @@ class ClusterUiRenderer:
 
     def _font_candidates(self) -> list[Path]:
         return [
+            PRETENDARD_SEMIBOLD_FONT_PATH,
+            INTER_BOLD_FONT_PATH,
             KAIGEN_GOTHIC_KR_BOLD_FONT_PATH,
             OPENPILOT_ADDON_FONT_DIR / "KaiGenGothicKR-Bold.ttf",
             JETBRAINS_MONO_FONT_PATH,
             OPENPILOT_FONT_DIR / "JetBrainsMono-Bold.ttf",
+            Path("/data/openpilot/selfdrive/assets/fonts/Pretendard-SemiBold.ttf"),
+            Path("/data/openpilot/selfdrive/assets/fonts/Inter-Bold.ttf"),
             Path("/data/openpilot/selfdrive/assets/fonts/KaiGenGothicKR-Bold.ttf"),
             Path("/data/openpilot/selfdrive/assets/addon/font/KaiGenGothicKR-Bold.ttf"),
             Path("/usr/share/fonts/truetype/jetbrains-mono/JetBrainsMono-Medium.ttf"),
@@ -1300,6 +1369,11 @@ class ClusterUiRenderer:
         if self._follow_vehicle_texture is not None:
             return
         self._follow_vehicle_texture = self._load_icon_texture(FOLLOW_VEHICLE_ICON_PATH, "Follow gap vehicle")
+
+    def _load_ego_vehicle_texture(self) -> None:
+        if self._ego_vehicle_texture is not None:
+            return
+        self._ego_vehicle_texture = self._load_icon_texture(EGO_VEHICLE_ICON_PATH, "Ego vehicle")
 
     def _load_drive_status_textures(self) -> None:
         if self._lfa_texture is None:
@@ -1487,6 +1561,9 @@ class ClusterUiRenderer:
         rl.end_mode_3d()
         self._profile_add("draw_scene.end_mode_3d", profile_stage)
         profile_stage = self._profile_start()
+        self._draw_ego_vehicle_icon(scene.vehicles, camera, scene.scene_shift_x_m)
+        self._profile_add("draw_scene.ego_vehicle_icon", profile_stage)
+        profile_stage = self._profile_start()
         self._draw_radar_point_labels(
             scene.radar_points,
             camera,
@@ -1572,6 +1649,8 @@ class ClusterUiRenderer:
         return points, point_count
 
     def _draw_vehicle(self, vehicle: VehicleBox) -> None:
+        if not vehicle.source and self._ego_vehicle_texture is not None:
+            return
         source_marker = vehicle.source.startswith("modelV2") or vehicle.source in ("radarState", "radarPoint")
         use_model = (
             self._vehicle_model is not None
@@ -1748,6 +1827,55 @@ class ClusterUiRenderer:
             rl.draw_model_ex(self._vehicle_model, position, rotation_axis, yaw_deg, scale, tint)
         finally:
             rl.rl_enable_backface_culling()
+
+    def _draw_ego_vehicle_icon(
+        self,
+        vehicles: tuple[VehicleBox, ...],
+        camera,
+        scene_shift_x_m: float = 0.0,
+    ) -> None:
+        texture = self._ego_vehicle_texture
+        if texture is None:
+            return
+        ego_vehicle = next((vehicle for vehicle in vehicles if not vehicle.source), None)
+        if ego_vehicle is None:
+            return
+
+        half_width = ego_vehicle.width_m * 0.5
+        half_length = ego_vehicle.length_m * 0.5
+        points = []
+        for z in (0.0, ego_vehicle.height_m):
+            for local_x, local_y in (
+                (-half_width, -half_length),
+                (half_width, -half_length),
+                (half_width, half_length),
+                (-half_width, half_length),
+            ):
+                anchor = rl.Vector3(
+                    ego_vehicle.center.x + scene_shift_x_m + ego_vehicle.right_x * local_x + ego_vehicle.forward_x * local_y,
+                    ego_vehicle.center.y + ego_vehicle.right_y * local_x + ego_vehicle.forward_y * local_y,
+                    z,
+                )
+                screen = world_to_screen_label_anchor(anchor, camera, self.width, self.height)
+                if screen is not None:
+                    points.append(screen)
+        if not points:
+            return
+
+        min_x = min(point.x for point in points)
+        max_x = max(point.x for point in points)
+        min_y = min(point.y for point in points)
+        max_y = max(point.y for point in points)
+        box_w = max(1.0, max_x - min_x)
+        box_h = max(1.0, max_y - min_y)
+        ui_scale = max(self.width / DESIGN_WIDTH, self.height / DESIGN_HEIGHT)
+        icon_h = clamp(max(box_h * 1.10, box_w * 1.05), 72.0 * ui_scale, 132.0 * ui_scale)
+        icon_w = icon_h * float(texture.width) / max(1.0, float(texture.height))
+        center_x = (min_x + max_x) * 0.5
+        center_y = (min_y + max_y) * 0.5
+        source = rl.Rectangle(0.0, 0.0, float(texture.width), float(texture.height))
+        dest = rl.Rectangle(center_x - icon_w * 0.5, center_y - icon_h * 0.5, icon_w, icon_h)
+        rl.draw_texture_pro(texture, source, dest, rl.Vector2(0.0, 0.0), 0.0, rl_color(WHITE))
 
     def _draw_vehicle_badges(
         self,
@@ -3027,7 +3155,7 @@ class ClusterUiRenderer:
 
         source = rl.Rectangle(0.0, 0.0, float(texture.width), float(texture.height))
         dest = rl.Rectangle(x, y, FOLLOW_GAP_ICON_W, FOLLOW_GAP_ICON_H)
-        rl.draw_texture_pro(texture, source, dest, rl.Vector2(0.0, 0.0), 0.0, rl_color(WHITE))
+        rl.draw_texture_pro(texture, source, dest, rl.Vector2(0.0, 0.0), 0.0, rl_color(self._current_theme().muted))
 
     def _draw_bottom_aligned_texture_icon(
         self,
