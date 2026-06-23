@@ -71,9 +71,14 @@ OPENPILOT_FONT_DIR = SELFDRIVE_DIR / "assets" / "fonts"
 OPENPILOT_ADDON_FONT_DIR = SELFDRIVE_DIR / "assets" / "addon" / "font"
 KAIGEN_GOTHIC_KR_BOLD_FONT_PATH = OPENPILOT_FONT_DIR / "KaiGenGothicKR-Bold.ttf"
 JETBRAINS_MONO_FONT_PATH = OPENPILOT_FONT_DIR / "JetBrainsMono-Medium.ttf"
+
+# ==========================================
+# 1. 3D 모델 및 커스텀 아이콘 경로 설정 (에러 원천 차단)
 VEHICLE_MODEL_PATH = CLUSTER_DIR / "assets" / "models" / "ev6" / "ev6_cluster.obj"
-FOLLOW_VEHICLE_ICON_PATH = Path("")
-LFA_ICON_PATH = Path("")
+FOLLOW_VEHICLE_ICON_PATH = SELFDRIVE_DIR / "assets" / "icons_mici" / "carrot_cruse_gap_trimmed.png"
+LFA_ICON_PATH = Path("none.png")
+# ==========================================
+
 ACCEL_TEXT_WIDTH_SAMPLES = ("+00.00", "-00.00")
 TURN_SIGNAL_LEFT_CENTER_X = 610
 TURN_SIGNAL_RIGHT_CENTER_X = 1310
@@ -199,7 +204,12 @@ VEHICLE_MATERIAL_COLORS: dict[str, tuple[int, int, int, int]] = {
     "Material.005": (18, 20, 22, 255),
     "Material.006": (18, 20, 22, 255),
 }
-DEFAULT_VEHICLE_MATERIAL_COLOR = (30, 32, 35, 255)
+
+# ==========================================
+# 2. EV6 차량 렌더링 색상을 다크 그레이로 조정하여 입체감 부여
+DEFAULT_VEHICLE_MATERIAL_COLOR = (100, 105, 110, 255)
+# ==========================================
+
 NV12_PACK_VERTEX_SHADER = """
 attribute vec3 vertexPosition;
 attribute vec2 vertexTexCoord;
@@ -611,7 +621,12 @@ class ClusterUiRenderer:
         profile_total = self._profile_start()
         self.hidden = hidden
         rl.set_trace_log_level(rl.TraceLogLevel.LOG_WARNING)
+        
+        # ==========================================
+        # 3. 고해상도 안티앨리어싱(MSAA) 설정 추가
         rl.set_config_flags(rl.ConfigFlags.FLAG_MSAA_4X_HINT)
+        # ==========================================
+        
         flags = 0
         if hidden:
             flags |= rl.ConfigFlags.FLAG_WINDOW_HIDDEN
