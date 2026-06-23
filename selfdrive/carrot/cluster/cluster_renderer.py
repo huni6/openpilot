@@ -78,6 +78,7 @@ VEHICLE_MODEL_PATH = CLUSTER_DIR / "assets" / "models" / "ev6" / "ev6_cluster.ob
 FOLLOW_VEHICLE_ICON_PATH = SELFDRIVE_DIR / "assets" / "icons_mici" / "carrot_cruse_gap_trimmed.png"
 EGO_VEHICLE_ICON_PATH = SELFDRIVE_DIR / "assets" / "icons_mici" / "ego_vehicle_custom.png"
 LFA_ICON_PATH = SELFDRIVE_DIR / "assets" / "icons_mici" / "carrot_wheel_org.png"
+CLUSTER_DIAG_LOG_PATH = Path(os.environ.get("CLUSTER_HUD_DIAG_LOG", "/tmp/cluster_hud_diag.log"))
 ACCEL_TEXT_WIDTH_SAMPLES = ("+00.00", "-00.00")
 TURN_SIGNAL_LEFT_CENTER_X = 610
 TURN_SIGNAL_RIGHT_CENTER_X = 1310
@@ -504,6 +505,15 @@ def label_rect_inside_bounds(
     return x >= left and y >= top and x + width <= right and y + height <= bottom
 
 
+def cluster_diag_log(message: str) -> None:
+    print(message, flush=True)
+    try:
+        with CLUSTER_DIAG_LOG_PATH.open("a", encoding="utf-8") as log_file:
+            log_file.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {message}\n")
+    except Exception:
+        pass
+
+
 class ClusterUiRenderer:
     def __init__(
         self,
@@ -624,12 +634,15 @@ class ClusterUiRenderer:
         if hidden:
             flags |= rl.ConfigFlags.FLAG_WINDOW_HIDDEN
         rl.set_config_flags(flags)
+        cluster_diag_log(
+            f"Cluster renderer init_window begin: hidden={hidden} size={self.width}x{self.height} "
+            f"selfdrive={SELFDRIVE_DIR}"
+        )
         profile_stage = self._profile_start()
         rl.init_window(self.width, self.height, self.title)
-        print(
+        cluster_diag_log(
             f"Cluster renderer open: hidden={hidden} size={self.width}x{self.height} "
-            f"selfdrive={SELFDRIVE_DIR}",
-            flush=True,
+            f"selfdrive={SELFDRIVE_DIR}"
         )
         self._profile_add("renderer.open.init_window", profile_stage)
         if self.target_fps > 0:
@@ -1323,17 +1336,16 @@ class ClusterUiRenderer:
                         rl.gen_texture_mipmaps(font.texture)
                         rl.set_texture_filter(font.texture, rl.TextureFilter.TEXTURE_FILTER_TRILINEAR)
                         self._owns_font = True
-                        print(
+                        cluster_diag_log(
                             f"Cluster font loaded: {candidate} "
-                            f"texture={font.texture.id} size={font.texture.width}x{font.texture.height}",
-                            flush=True,
+                            f"texture={font.texture.id} size={font.texture.width}x{font.texture.height}"
                         )
                         return font
-                    print(f"Cluster font invalid texture: {candidate} id={font.texture.id}", flush=True)
+                    cluster_diag_log(f"Cluster font invalid texture: {candidate} id={font.texture.id}")
                 except Exception as exc:
-                    print(f"Cluster font load failed for {candidate}: {exc}", flush=True)
+                    cluster_diag_log(f"Cluster font load failed for {candidate}: {exc}")
         self._owns_font = False
-        print("Cluster font fallback: raylib default font", flush=True)
+        cluster_diag_log("Cluster font fallback: raylib default font")
         return rl.get_font_default()
 
     def _font_candidates(self) -> list[Path]:
@@ -1395,22 +1407,21 @@ class ClusterUiRenderer:
 
     def _load_icon_texture(self, path: Path, label: str):
         if not path.exists():
-            print(f"{label} icon missing: {path}", flush=True)
+            cluster_diag_log(f"{label} icon missing: {path}")
             return None
         try:
             texture = rl.load_texture(str(path))
             if texture.id <= 0:
-                print(f"{label} icon invalid texture: {path} id={texture.id}", flush=True)
+                cluster_diag_log(f"{label} icon invalid texture: {path} id={texture.id}")
                 return None
             rl.set_texture_filter(texture, rl.TextureFilter.TEXTURE_FILTER_BILINEAR)
-            print(
+            cluster_diag_log(
                 f"{label} icon loaded: {path} "
-                f"texture={texture.id} size={texture.width}x{texture.height}",
-                flush=True,
+                f"texture={texture.id} size={texture.width}x{texture.height}"
             )
             return texture
         except Exception as exc:
-            print(f"{label} icon load failed for {path}: {exc}", flush=True)
+            cluster_diag_log(f"{label} icon load failed for {path}: {exc}")
             return None
 
     def _load_lfa_active_texture(self):
