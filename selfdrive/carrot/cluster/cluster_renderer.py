@@ -72,6 +72,7 @@ OPENPILOT_ADDON_FONT_DIR = SELFDRIVE_DIR / "assets" / "addon" / "font"
 KAIGEN_GOTHIC_KR_BOLD_FONT_PATH = OPENPILOT_FONT_DIR / "KaiGenGothicKR-Bold.ttf"
 JETBRAINS_MONO_FONT_PATH = OPENPILOT_FONT_DIR / "JetBrainsMono-Medium.ttf"
 VEHICLE_MODEL_PATH = CLUSTER_DIR / "assets" / "models" / "cybertruck" / "cybertruck_cluster.obj"
+EGO_VEHICLE_TEXTURE_PATH = SELFDRIVE_DIR / "assets" / "icons_mici" / "ego_vehicle_custom.png"
 FOLLOW_VEHICLE_ICON_PATH = SELFDRIVE_DIR / "assets" / "icons_mici" / "carrot_cruse_gap_trimmed.png"
 LFA_ICON_PATH = SELFDRIVE_DIR / "assets" / "icons_mici" / "carrot_wheel_org.png"
 ACCEL_TEXT_WIDTH_SAMPLES = ("+00.00", "-00.00")
@@ -185,6 +186,8 @@ WORLD_LABEL_MIN_SCALE = 0.56
 WORLD_LABEL_TEXTURE_CACHE_LIMIT = 512
 WORLD_LABEL_TEXTURE_SIZE_GRID = 0.25
 WORLD_LABEL_TEXTURE_PADDING_PX = 4
+EGO_VEHICLE_TEXTURE_SCALE = 1.55
+EGO_VEHICLE_TEXTURE_MIN_SIZE_PX = 42.0
 VEHICLE_MATERIAL_COLORS: dict[str, tuple[int, int, int, int]] = {
     "body": (156, 166, 172, 255),
     "wheel": (18, 20, 22, 255),
@@ -535,6 +538,7 @@ class ClusterUiRenderer:
         self._nv12_pack_shader_locations: dict[str, int] = {}
         self._vehicle_model = None
         self._vehicle_model_load_attempted = False
+        self._ego_vehicle_texture = None
         self._follow_vehicle_texture = None
         self._lfa_texture = None
         self._lfa_active_texture = None
@@ -630,6 +634,9 @@ class ClusterUiRenderer:
         self._load_vehicle_model()
         self._profile_add("renderer.open.load_vehicle_model", profile_stage)
         profile_stage = self._profile_start()
+        self._load_ego_vehicle_texture()
+        self._profile_add("renderer.open.load_ego_vehicle_texture", profile_stage)
+        profile_stage = self._profile_start()
         self._load_follow_vehicle_texture()
         self._profile_add("renderer.open.load_follow_vehicle_texture", profile_stage)
         profile_stage = self._profile_start()
@@ -670,6 +677,9 @@ class ClusterUiRenderer:
         if self._route_video_texture is not None:
             rl.unload_texture(self._route_video_texture)
             self._route_video_texture = None
+        if self._ego_vehicle_texture is not None:
+            rl.unload_texture(self._ego_vehicle_texture)
+            self._ego_vehicle_texture = None
         if self._follow_vehicle_texture is not None:
             rl.unload_texture(self._follow_vehicle_texture)
             self._follow_vehicle_texture = None
@@ -1294,6 +1304,11 @@ class ClusterUiRenderer:
             print(f"Cybertruck vehicle model load failed: {exc}")
             self._vehicle_model = None
 
+    def _load_ego_vehicle_texture(self) -> None:
+        if self._ego_vehicle_texture is not None:
+            return
+        self._ego_vehicle_texture = self._load_icon_texture(EGO_VEHICLE_TEXTURE_PATH, "Ego vehicle")
+
     def _load_follow_vehicle_texture(self) -> None:
         if self._follow_vehicle_texture is not None:
             return
@@ -1449,6 +1464,7 @@ class ClusterUiRenderer:
             rl.CameraProjection.CAMERA_PERSPECTIVE,
         )
         profile_stage = self._profile_start()
+        ego_vehicle_texture_rects: list[tuple[float, float, float, float]] = []
         rl.begin_mode_3d(camera)
         self._profile_add("draw_scene.begin_mode_3d", profile_stage)
         rl.rl_push_matrix()
@@ -1477,6 +1493,11 @@ class ClusterUiRenderer:
             self._profile_add("draw_scene.radar_points", profile_stage)
             profile_stage = self._profile_start()
             for vehicle in scene.vehicles:
+                texture_rect = self._ego_vehicle_texture_rect(vehicle, camera, scene.scene_shift_x_m)
+                if texture_rect is not None:
+                    ego_vehicle_texture_rects.append(texture_rect)
+                    self._draw_vehicle_shadow(vehicle)
+                    continue
                 self._draw_vehicle(vehicle)
             self._profile_add("draw_scene.vehicles", profile_stage)
         finally:
@@ -1484,6 +1505,11 @@ class ClusterUiRenderer:
         profile_stage = self._profile_start()
         rl.end_mode_3d()
         self._profile_add("draw_scene.end_mode_3d", profile_stage)
+        if ego_vehicle_texture_rects:
+            profile_stage = self._profile_start()
+            for texture_rect in ego_vehicle_texture_rects:
+                self._draw_ego_vehicle_texture(texture_rect)
+            self._profile_add("draw_scene.ego_vehicle_texture", profile_stage)
         profile_stage = self._profile_start()
         self._draw_radar_point_labels(
             scene.radar_points,
@@ -1568,6 +1594,75 @@ class ClusterUiRenderer:
         while len(self._triangle_strip_point_cache) > TRIANGLE_STRIP_POINT_CACHE_LIMIT:
             self._triangle_strip_point_cache.popitem(last=False)
         return points, point_count
+
+    @staticmethod
+    def _uses_ego_vehicle_texture(vehicle: VehicleBox) -> bool:
+        return (
+            not vehicle.source
+            and not vehicle.label
+            and not vehicle.primary
+            and not vehicle.cut_in
+        )
+
+    def _ego_vehicle_texture_rect(
+        self,
+        vehicle: VehicleBox,
+        camera,
+        scene_shift_x_m: float,
+    ) -> tuple[float, float, float, float] | None:
+        texture = self._ego_vehicle_texture
+        if texture is None or not self._uses_ego_vehicle_texture(vehicle):
+            return None
+
+        z = max(0.05, vehicle.height_m * 0.42)
+        center = rl.Vector3(vehicle.center.x + scene_shift_x_m, vehicle.center.y, z)
+        half_width = vehicle.width_m * 0.5
+        half_length = vehicle.length_m * 0.5
+        left = rl.Vector3(
+            center.x - vehicle.right_x * half_width,
+            center.y - vehicle.right_y * half_width,
+            z,
+        )
+        right = rl.Vector3(
+            center.x + vehicle.right_x * half_width,
+            center.y + vehicle.right_y * half_width,
+            z,
+        )
+        front = rl.Vector3(
+            center.x + vehicle.forward_x * half_length,
+            center.y + vehicle.forward_y * half_length,
+            z,
+        )
+        rear = rl.Vector3(
+            center.x - vehicle.forward_x * half_length,
+            center.y - vehicle.forward_y * half_length,
+            z,
+        )
+        center_screen = world_to_screen_label_anchor(center, camera, self.width, self.height)
+        left_screen = world_to_screen_label_anchor(left, camera, self.width, self.height)
+        right_screen = world_to_screen_label_anchor(right, camera, self.width, self.height)
+        front_screen = world_to_screen_label_anchor(front, camera, self.width, self.height)
+        rear_screen = world_to_screen_label_anchor(rear, camera, self.width, self.height)
+        if any(screen is None for screen in (center_screen, left_screen, right_screen, front_screen, rear_screen)):
+            return None
+
+        width_px = math.hypot(float(right_screen.x - left_screen.x), float(right_screen.y - left_screen.y))
+        length_px = math.hypot(float(front_screen.x - rear_screen.x), float(front_screen.y - rear_screen.y))
+        draw_size = max(width_px, length_px, EGO_VEHICLE_TEXTURE_MIN_SIZE_PX) * EGO_VEHICLE_TEXTURE_SCALE
+        aspect = max(0.1, float(texture.width) / max(1.0, float(texture.height)))
+        draw_w = draw_size
+        draw_h = draw_size / aspect
+        return float(center_screen.x), float(center_screen.y), draw_w, draw_h
+
+    def _draw_ego_vehicle_texture(self, texture_rect: tuple[float, float, float, float]) -> None:
+        texture = self._ego_vehicle_texture
+        if texture is None:
+            return
+        center_x, center_y, width, height = texture_rect
+        source = rl.Rectangle(0.0, 0.0, float(texture.width), float(texture.height))
+        dest = rl.Rectangle(center_x, center_y, width, height)
+        origin = rl.Vector2(width * 0.5, height * 0.5)
+        rl.draw_texture_pro(texture, source, dest, origin, 0.0, rl_color(WHITE))
 
     def _draw_vehicle(self, vehicle: VehicleBox) -> None:
         source_marker = vehicle.source.startswith("modelV2") or vehicle.source in ("radarState", "radarPoint")
