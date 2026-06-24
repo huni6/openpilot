@@ -3109,9 +3109,9 @@ class ClusterUiRenderer:
         self._draw_follow_vehicle_icon(icon_x, icon_y)
 
     def _draw_follow_vehicle_icon(self, x: float, y: float) -> None:
+        theme = self._current_theme()
         texture = self._follow_vehicle_texture
         if texture is None:
-            theme = self._current_theme()
             car_x = x + FOLLOW_GAP_ICON_W * 0.5
             car_y = y + FOLLOW_GAP_ICON_H * 0.5
             self._rounded_rect(car_x - 16, car_y - 8, 32, 16, 5.0, theme.muted, None, 0.0)
@@ -3120,7 +3120,7 @@ class ClusterUiRenderer:
 
         source = rl.Rectangle(0.0, 0.0, float(texture.width), float(texture.height))
         dest = rl.Rectangle(x, y, FOLLOW_GAP_ICON_W, FOLLOW_GAP_ICON_H)
-        rl.draw_texture_pro(texture, source, dest, rl.Vector2(0.0, 0.0), 0.0, rl_color(WHITE))
+        rl.draw_texture_pro(texture, source, dest, rl.Vector2(0.0, 0.0), 0.0, rl_color(theme.muted))
 
     def _draw_bottom_aligned_texture_icon(
         self,
