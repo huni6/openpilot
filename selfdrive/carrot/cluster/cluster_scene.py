@@ -115,6 +115,10 @@ MODEL_LINE_STRIP_GROUP_CACHE_POINT_GRID_M = 0.05
 MODEL_LINE_STRIP_GROUP_CACHE_COLOR: Color = (0, 0, 0, 0)
 MODEL_LINE_RENDER_POINT_KEY_CACHE_LIMIT = 256
 MODEL_LINE_RENDER_POINT_LIMIT = 0
+MODEL_LINE_RENDER_SMOOTH_START_M = 20.0
+MODEL_LINE_RENDER_SMOOTH_MIN_STEP_M = 0.35
+MODEL_LINE_RENDER_SMOOTH_MAX_STEP_M = 1.0
+MODEL_LINE_RENDER_SMOOTH_STEP_PER_M = 0.12
 LANE_OFFSET_STRIP_CACHE_LIMIT = 64
 LANE_OFFSET_STRIP_CACHE_OFFSET_GRID = 0.01
 LANE_OFFSET_STRIP_CACHE_STEERING_GRID = 0.002
@@ -254,7 +258,7 @@ ModelLineStripCacheKey = tuple[
     ModelLineStripGeometrySpecs,
 ]
 _MODEL_LINE_STRIP_GROUP_CACHE: OrderedDict[ModelLineStripCacheKey, ModelLineStripGroups] = OrderedDict()
-ModelLineRenderPointKeyCacheKey = tuple[int, int]
+ModelLineRenderPointKeyCacheKey = tuple[int, int, bool]
 _MODEL_LINE_RENDER_POINT_KEY_CACHE: OrderedDict[
     ModelLineRenderPointKeyCacheKey,
     tuple[tuple[ModelPathPoint, ...], tuple[ModelPathPoint, ...], ModelLineStripPointKey],
@@ -1104,11 +1108,41 @@ def model_line_cache_point_key(model_points: tuple[ModelPathPoint, ...]) -> Mode
     )
 
 
+def smooth_model_line_points_for_render(
+    model_points: tuple[ModelPathPoint, ...],
+) -> tuple[ModelPathPoint, ...]:
+    if len(model_points) < 3:
+        return model_points
+
+    smoothed: list[ModelPathPoint] = [model_points[0]]
+    changed = False
+    for point in model_points[1:]:
+        lateral_m = point.lateral_m
+        previous = smoothed[-1]
+        if point.forward_m >= MODEL_LINE_RENDER_SMOOTH_START_M:
+            forward_delta_m = max(0.001, point.forward_m - previous.forward_m)
+            max_step_m = min(
+                MODEL_LINE_RENDER_SMOOTH_MAX_STEP_M,
+                max(
+                    MODEL_LINE_RENDER_SMOOTH_MIN_STEP_M,
+                    forward_delta_m * MODEL_LINE_RENDER_SMOOTH_STEP_PER_M,
+                ),
+            )
+            lateral_delta_m = lateral_m - previous.lateral_m
+            if abs(lateral_delta_m) > max_step_m:
+                lateral_m = previous.lateral_m + math.copysign(max_step_m, lateral_delta_m)
+                changed = True
+        smoothed.append(replace(point, lateral_m=lateral_m) if lateral_m != point.lateral_m else point)
+
+    return tuple(smoothed) if changed else model_points
+
+
 def model_line_render_points_and_key(
     model_points: tuple[ModelPathPoint, ...],
     point_limit: int,
+    smooth_model_points: bool = False,
 ) -> tuple[tuple[ModelPathPoint, ...], ModelLineStripPointKey]:
-    cache_key = (id(model_points), int(point_limit))
+    cache_key = (id(model_points), int(point_limit), smooth_model_points)
     cached = _MODEL_LINE_RENDER_POINT_KEY_CACHE.get(cache_key)
     if cached is not None:
         cached_model_points, render_points, point_key = cached
@@ -1131,6 +1165,8 @@ def model_line_render_points_and_key(
             selected.append(model_points[index])
             previous_index = index
         render_points = tuple(selected)
+    if smooth_model_points:
+        render_points = smooth_model_line_points_for_render(render_points)
 
     point_key = model_line_cache_point_key(render_points)
     _MODEL_LINE_RENDER_POINT_KEY_CACHE[cache_key] = (model_points, render_points, point_key)
@@ -1140,7 +1176,11 @@ def model_line_render_points_and_key(
 
 
 def model_line_points_for_render(model_points: tuple[ModelPathPoint, ...]) -> tuple[ModelPathPoint, ...]:
-    render_points, _ = model_line_render_points_and_key(model_points, MODEL_LINE_RENDER_POINT_LIMIT)
+    render_points, _ = model_line_render_points_and_key(
+        model_points,
+        MODEL_LINE_RENDER_POINT_LIMIT,
+        True,
+    )
     return render_points
 
 
@@ -1153,12 +1193,17 @@ def cached_model_line_strip_groups(
     extend_before_model: bool,
     profile_add: ProfileAdd | None = None,
     profile_prefix: str = "scene.model_line",
+    smooth_model_points: bool = False,
 ) -> ModelLineStripGroups:
     cache_start_m = model_line_cache_start_m(start_m)
     cache_end_m = model_line_cache_end_m(end_m)
     geometry_specs = model_line_geometry_specs(specs)
     profile_stage = profile_scene_start(profile_add)
-    render_points, point_key = model_line_render_points_and_key(model_points, MODEL_LINE_RENDER_POINT_LIMIT)
+    render_points, point_key = model_line_render_points_and_key(
+        model_points,
+        MODEL_LINE_RENDER_POINT_LIMIT,
+        smooth_model_points,
+    )
     profile_scene_add(profile_add, f"{profile_prefix}.key", profile_stage)
     key = (
         point_key,
@@ -1351,6 +1396,7 @@ def model_line_strip_groups(
     extend_before_model: bool,
     profile_add: ProfileAdd | None = None,
     profile_prefix: str = "scene.model_line",
+    smooth_model_points: bool = False,
 ) -> ModelLineStripGroups:
     groups = cached_model_line_strip_groups(
         model_points,
@@ -1361,6 +1407,7 @@ def model_line_strip_groups(
         extend_before_model,
         profile_add,
         profile_prefix,
+        smooth_model_points,
     )
     if groups is None:
         return None
@@ -3205,6 +3252,7 @@ def build_cluster_scene(
                 True,
                 profile_add,
                 "scene.lane_model",
+                smooth_model_points=True,
             )
             if profile_add is not None:
                 lane_model_ms += (time.perf_counter() - profile_step) * 1000.0
