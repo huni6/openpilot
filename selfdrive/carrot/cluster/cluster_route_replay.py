@@ -113,6 +113,8 @@ LANE_CHANGE_REINDEX_RESET_THRESHOLD = -0.08
 CONTINUOUS_LANE_CHANGE_REBASE_PROGRESS = 0.12
 LANE_CHANGE_MODEL_DIRECT_ONLY = True
 MODEL_DIRECT_LANE_SETTLE_MIN_PROGRESS = 0.65
+MODEL_LANE_LINE_TEMPORAL_SMOOTH_ALPHA = 0.35
+MODEL_LANE_LINE_TEMPORAL_RESET_DELTA_M = 1.8
 LONGITUDINAL_PERSONALITY_GAPS = {
     "aggressive": 1,
     "standard": 2,
@@ -1266,7 +1268,8 @@ class RouteLogParser:
         lane_lines = safe_get(model, "laneLines")
         lane_probs = safe_get(model, "laneLineProbs")
         if lane_lines is not None:
-            self.model_lane_lines = tuple(model_line_points(lane_lines[index]) for index in range(len(lane_lines)))
+            raw_model_lane_lines = tuple(model_line_points(lane_lines[index]) for index in range(len(lane_lines)))
+            self.model_lane_lines = smooth_temporal_model_lane_lines(self.model_lane_lines, raw_model_lane_lines)
         if lane_lines is not None and len(lane_lines) >= 3:
             left_y = first_list_value(safe_get(lane_lines[1], "y"))
             right_y = first_list_value(safe_get(lane_lines[2], "y"))
@@ -2708,6 +2711,57 @@ def model_line_points(line: Any) -> tuple[ModelPathPoint, ...]:
         points.append(ModelPathPoint(forward_m=forward_m, lateral_m=lateral_m))
         previous_forward_m = forward_m
     return tuple(points)
+
+
+def model_line_lateral_at_forward(points: tuple[ModelPathPoint, ...], forward_m: float) -> float | None:
+    if not points:
+        return None
+    previous = points[0]
+    if forward_m <= previous.forward_m:
+        return previous.lateral_m
+    for point in points[1:]:
+        if forward_m <= point.forward_m:
+            span = max(0.001, point.forward_m - previous.forward_m)
+            amount = clamp((forward_m - previous.forward_m) / span, 0.0, 1.0)
+            return previous.lateral_m + (point.lateral_m - previous.lateral_m) * amount
+        previous = point
+    return None
+
+
+def smooth_temporal_model_line_points(
+    previous_points: tuple[ModelPathPoint, ...],
+    current_points: tuple[ModelPathPoint, ...],
+) -> tuple[ModelPathPoint, ...]:
+    if len(previous_points) < 2 or len(current_points) < 2:
+        return current_points
+
+    smoothed: list[ModelPathPoint] = []
+    changed = False
+    for point in current_points:
+        previous_lateral_m = model_line_lateral_at_forward(previous_points, point.forward_m)
+        if previous_lateral_m is None:
+            smoothed.append(point)
+            continue
+        lateral_delta_m = point.lateral_m - previous_lateral_m
+        if abs(lateral_delta_m) > MODEL_LANE_LINE_TEMPORAL_RESET_DELTA_M:
+            return current_points
+        lateral_m = previous_lateral_m + lateral_delta_m * MODEL_LANE_LINE_TEMPORAL_SMOOTH_ALPHA
+        changed = changed or abs(lateral_m - point.lateral_m) > 0.001
+        smoothed.append(replace(point, lateral_m=lateral_m))
+
+    return tuple(smoothed) if changed else current_points
+
+
+def smooth_temporal_model_lane_lines(
+    previous_lines: tuple[tuple[ModelPathPoint, ...], ...],
+    current_lines: tuple[tuple[ModelPathPoint, ...], ...],
+) -> tuple[tuple[ModelPathPoint, ...], ...]:
+    if len(previous_lines) != len(current_lines):
+        return current_lines
+    return tuple(
+        smooth_temporal_model_line_points(previous_points, current_points)
+        for previous_points, current_points in zip(previous_lines, current_lines)
+    )
 
 
 def model_path_points_from_model_v2(model: Any) -> tuple[ModelPathPoint, ...]:
