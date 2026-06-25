@@ -40,6 +40,7 @@ from cluster_config import (
     VEHICLE_LANE_CHANGE_SLOPE,
     VEHICLE_LENGTH_M,
     VEHICLE_WIDTH_M,
+    WHITE,
 )
 from cluster_models import (
     ClusterUiState,
@@ -166,6 +167,7 @@ EGO_VEHICLE_CENTER_FORWARD_M = EGO_FORWARD_M - VEHICLE_LENGTH_M * 0.5
 LANE_HIGHLIGHT_COLOR = (64, 148, 255)
 LANE_HIGHLIGHT_ALPHA = 220
 LANE_HIGHLIGHT_ROUTE_ALPHA = 170
+LIGHT_THEME_WHITE_LANE_MARKING = (184, 194, 204)
 BSD_LANE_MARKING_MATCH_TOLERANCE = 0.45
 LANE_DASH_LENGTH_M = 5.2
 LANE_DASH_GAP_M = 4.2
@@ -3138,9 +3140,12 @@ def bsd_lane_marking_offsets(state: ClusterUiState) -> tuple[float, ...]:
 def lane_marking_color_for_state(
     marking: LaneMarking,
     bsd_marking_offsets: tuple[float, ...],
+    theme: ClusterTheme = LIGHT_CLUSTER_THEME,
 ) -> tuple[int, int, int]:
     if any(abs(marking.offset - offset) <= BSD_LANE_MARKING_MATCH_TOLERANCE for offset in bsd_marking_offsets):
         return RED
+    if not theme.is_dark and marking.color == WHITE:
+        return LIGHT_THEME_WHITE_LANE_MARKING
     return marking.color
 
 
@@ -3235,7 +3240,7 @@ def build_cluster_scene(
             ),
             (
                 marking.width,
-                rgba(lane_marking_color_for_state(marking, bsd_marking_offsets)),
+                rgba(lane_marking_color_for_state(marking, bsd_marking_offsets, theme)),
                 LANE_MARKING_HEIGHT_M,
             ),
         )
