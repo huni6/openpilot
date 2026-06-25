@@ -167,7 +167,7 @@ EGO_VEHICLE_CENTER_FORWARD_M = EGO_FORWARD_M - VEHICLE_LENGTH_M * 0.5
 LANE_HIGHLIGHT_COLOR = (64, 148, 255)
 LANE_HIGHLIGHT_ALPHA = 220
 LANE_HIGHLIGHT_ROUTE_ALPHA = 170
-LIGHT_THEME_WHITE_LANE_MARKING = (184, 194, 204)
+LIGHT_THEME_WHITE_LANE_MARKING = (224, 229, 234)
 BSD_LANE_MARKING_MATCH_TOLERANCE = 0.45
 LANE_DASH_LENGTH_M = 5.2
 LANE_DASH_GAP_M = 4.2
@@ -3149,6 +3149,28 @@ def lane_marking_color_for_state(
     return marking.color
 
 
+def lane_marking_specs_for_state(
+    marking: LaneMarking,
+    bsd_marking_offsets: tuple[float, ...],
+    theme: ClusterTheme = LIGHT_CLUSTER_THEME,
+) -> tuple[tuple[int, Color, float], ...]:
+    lane_color = rgba(lane_marking_color_for_state(marking, bsd_marking_offsets, theme))
+    if not theme.is_dark:
+        return ((marking.width, lane_color, LANE_MARKING_HEIGHT_M),)
+    return (
+        (
+            marking.width + LANE_MARKING_BORDER_EXTRA_WIDTH_PX,
+            theme.lane_marking_border,
+            LANE_MARKING_SHADOW_HEIGHT_M,
+        ),
+        (
+            marking.width,
+            lane_color,
+            LANE_MARKING_HEIGHT_M,
+        ),
+    )
+
+
 def data_geometry_mode_for_state(state: ClusterUiState) -> bool:
     return (
         state.route_overlay is not None
@@ -3232,18 +3254,7 @@ def build_cluster_scene(
     for marking in state.lanes:
         if not marking.visible:
             continue
-        marking_specs = (
-            (
-                marking.width + LANE_MARKING_BORDER_EXTRA_WIDTH_PX,
-                theme.lane_marking_border,
-                LANE_MARKING_SHADOW_HEIGHT_M,
-            ),
-            (
-                marking.width,
-                rgba(lane_marking_color_for_state(marking, bsd_marking_offsets, theme)),
-                LANE_MARKING_HEIGHT_M,
-            ),
-        )
+        marking_specs = lane_marking_specs_for_state(marking, bsd_marking_offsets, theme)
         strip_groups: tuple[tuple[MeshStrip, ...], ...] | None = None
         if marking.model_points:
             profile_step = profile_scene_start(profile_add)
