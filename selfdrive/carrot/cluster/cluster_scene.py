@@ -3286,9 +3286,8 @@ def build_cluster_scene(
             if profile_add is not None:
                 lane_offset_ms += (time.perf_counter() - profile_step) * 1000.0
         profile_step = profile_scene_start(profile_add)
-        backing_strips, foreground_strips = strip_groups
-        lane_strips.extend(backing_strips)
-        lane_strips.extend(foreground_strips)
+        for strips in strip_groups:
+            lane_strips.extend(strips)
         if profile_add is not None:
             lane_collect_ms += (time.perf_counter() - profile_step) * 1000.0
     profile_scene_add_elapsed(profile_add, "scene.build.lane_markings.model", lane_model_ms)
