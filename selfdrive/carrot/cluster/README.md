@@ -234,14 +234,13 @@ Turn-signal arrows are hidden while off and only draw during their blink-on
 phase. The top HUD also uses `carState.gearShifter`, `gearStep`, `pcmCruiseGap`,
 `selfdriveState.personality`, and `carControl.latActive` to show gear
 (`P/R/N/D/1-8`) in a smaller transparent rounded-square outline, front gap bars,
-cruise set speed, and the LFA active icon. This top
+centered cruise set speed, and the LFA active icon. This top
 drive-status row uses the same top margin as the road speed-limit sign while
 bottom-aligning gear, gap, cruise set, and LFA elements to the measured
-bottom of the cruise-set text. The gap vehicle uses
-`selfdrive/assets/icons_mici/carrot_cruse_gap_trimmed.png` at its source aspect
-ratio and is taller than before while the gap bars keep their own size/spacing;
-all four gap bars stay visible, sit close together, and bottom-align to the
-vehicle while inactive bars are gray and active bars use `#bb3d91`. Cruise set
+bottom of the cruise-set text. Gear text and outline are black in the light
+theme and white in the dark theme for every gear value. The gap display now
+draws only the four bars, keeps them close together, and right-aligns them in
+the gap area while inactive bars are gray and active bars use `#bb3d91`. Cruise set
 speed and `km/h` use the same font size and color; paused cruise keeps the set
 speed but draws it gray, and inactive cruise draws gray `--- km/h`. The
 lane-change icon is not drawn; the LFA icon uses
