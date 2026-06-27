@@ -240,7 +240,8 @@ bottom-aligning gear, gap, cruise set, and LFA elements to the measured
 bottom of the cruise-set text. Gear text and outline are black in the light
 theme and white in the dark theme for every gear value. The gap display now
 draws only the four bars, keeps them close together, and right-aligns them in
-the gap area while inactive bars are gray and active bars use `#bb3d91`. Cruise set
+the space between gear and the centered cruise set speed while inactive bars
+are gray and active bars use the same blue as the cruise set speed. Cruise set
 speed and `km/h` use the same font size and color; paused cruise keeps the set
 speed but draws it gray, and inactive cruise draws gray `--- km/h`. The
 lane-change icon is not drawn; the LFA icon uses
