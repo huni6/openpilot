@@ -298,6 +298,8 @@ vehicles such as front-center `radarState` leads; `1` leaves raw points
 unmerged for detail checks, including radar vehicle candidate boxes and
 radar-to-detected-vehicle speed merges. Vehicle/radar metric labels sit closer
 to the point/box top so speed and distance are less high above the vehicle.
+Detected vehicle markers use a low-poly car silhouette with a lower body and
+small roof instead of a plain cube.
 `LR`/`RR` rear-corner detections render as normal vehicle boxes at their actual
 detected positions. The older fixed rear-tire-depth 2D arrow/label is removed.
 The default drive camera sits closer to the ego roof, lower than the earlier

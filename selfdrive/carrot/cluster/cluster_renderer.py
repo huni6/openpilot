@@ -1670,14 +1670,7 @@ class ClusterUiRenderer:
         self._draw_vehicle_box(vehicle)
 
     def _draw_vehicle_marker(self, vehicle: VehicleBox) -> None:
-        alpha = int(80 + 150 * clamp(vehicle.confidence, 0.0, 1.0))
-        marker_center = rl.Vector3(vehicle.center.x, vehicle.center.y, vehicle.height_m * 0.32)
-        marker_size = rl.Vector3(
-            max(0.55, vehicle.width_m * 0.68),
-            max(1.05, vehicle.length_m * 0.64),
-            max(0.42, vehicle.height_m * 0.45),
-        )
-        rl.draw_cube_v(marker_center, marker_size, rl_color(vehicle.body_color, alpha))
+        self._draw_low_poly_vehicle(vehicle, marker=True)
 
     def _draw_radar_point(self, point: RadarPointMarker) -> None:
         side_m = max(0.16, point.radius_m * 1.75)
@@ -1959,10 +1952,19 @@ class ClusterUiRenderer:
         )
 
     def _draw_vehicle_box(self, vehicle: VehicleBox) -> None:
-        half_width = vehicle.width_m * 0.5
-        half_length = vehicle.length_m * 0.5
+        self._draw_low_poly_vehicle(vehicle, marker=False)
+
+    def _draw_low_poly_vehicle(self, vehicle: VehicleBox, marker: bool) -> None:
+        half_width = vehicle.width_m * (0.38 if marker else 0.5)
+        half_length = vehicle.length_m * (0.40 if marker else 0.5)
         z0 = 0.035
-        z1 = vehicle.height_m + z0
+        body_z = vehicle.height_m * (0.34 if marker else 0.40) + z0
+        roof_z = vehicle.height_m * (0.58 if marker else 0.68) + z0
+        shoulder_width = half_width * 0.84
+        shoulder_length = half_length * 0.92
+        cabin_width = half_width * (0.44 if marker else 0.48)
+        cabin_rear = -half_length * 0.30
+        cabin_front = half_length * 0.22
 
         def corner(local_x: float, local_y: float, z: float) -> Vec3:
             return Vec3(
@@ -1977,32 +1979,38 @@ class ClusterUiRenderer:
             corner(half_width, half_length, z0),
             corner(-half_width, half_length, z0),
         )
-        top = (
-            corner(-half_width, -half_length, z1),
-            corner(half_width, -half_length, z1),
-            corner(half_width, half_length, z1),
-            corner(-half_width, half_length, z1),
+        shoulder = (
+            corner(-shoulder_width, -shoulder_length, body_z),
+            corner(shoulder_width, -shoulder_length, body_z),
+            corner(shoulder_width, shoulder_length, body_z),
+            corner(-shoulder_width, shoulder_length, body_z),
+        )
+        cabin_base = (
+            corner(-cabin_width, cabin_rear, body_z + 0.012),
+            corner(cabin_width, cabin_rear, body_z + 0.012),
+            corner(cabin_width * 0.92, cabin_front, body_z + 0.012),
+            corner(-cabin_width * 0.92, cabin_front, body_z + 0.012),
+        )
+        cabin_top = (
+            corner(-cabin_width * 0.72, cabin_rear * 0.88, roof_z),
+            corner(cabin_width * 0.72, cabin_rear * 0.88, roof_z),
+            corner(cabin_width * 0.66, cabin_front * 0.82, roof_z),
+            corner(-cabin_width * 0.66, cabin_front * 0.82, roof_z),
         )
         self._draw_vehicle_shadow(vehicle)
-        self._draw_quad(base[0], base[1], top[1], top[0], vehicle.rear_color)
-        self._draw_quad(base[1], base[2], top[2], top[1], vehicle.side_color)
-        self._draw_quad(base[2], base[3], top[3], top[2], vehicle.body_color)
-        self._draw_quad(base[3], base[0], top[0], top[3], vehicle.side_color)
-        self._draw_quad(top[0], top[1], top[2], top[3], vehicle.body_color)
-
-        inset = 0.22
-        highlight = tuple(
-            Vec3(
-                point.x + (vehicle.center.x - point.x) * inset,
-                point.y + (vehicle.center.y - point.y) * inset,
-                point.z + 0.006,
-            )
-            for point in top
-        )
-        self._draw_quad(highlight[0], highlight[1], highlight[2], highlight[3], vehicle.top_highlight)
+        self._draw_quad(base[0], base[1], shoulder[1], shoulder[0], vehicle.rear_color)
+        self._draw_quad(base[1], base[2], shoulder[2], shoulder[1], vehicle.side_color)
+        self._draw_quad(base[2], base[3], shoulder[3], shoulder[2], vehicle.body_color)
+        self._draw_quad(base[3], base[0], shoulder[0], shoulder[3], vehicle.side_color)
+        self._draw_quad(shoulder[0], shoulder[1], shoulder[2], shoulder[3], vehicle.body_color)
+        self._draw_quad(cabin_base[0], cabin_base[1], cabin_top[1], cabin_top[0], vehicle.rear_color)
+        self._draw_quad(cabin_base[1], cabin_base[2], cabin_top[2], cabin_top[1], vehicle.side_color)
+        self._draw_quad(cabin_base[2], cabin_base[3], cabin_top[3], cabin_top[2], vehicle.body_color)
+        self._draw_quad(cabin_base[3], cabin_base[0], cabin_top[0], cabin_top[3], vehicle.side_color)
+        self._draw_quad(cabin_top[0], cabin_top[1], cabin_top[2], cabin_top[3], vehicle.top_highlight)
 
         outline = rl_color(vehicle.outline_color)
-        edge_points = base + top
+        edge_points = shoulder + cabin_top
         edges = (
             (0, 1),
             (1, 2),
