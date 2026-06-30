@@ -1485,7 +1485,6 @@ class ClusterUiRenderer:
                 texture_rect = self._ego_vehicle_texture_rect(vehicle, camera, scene.scene_shift_x_m)
                 if texture_rect is not None:
                     ego_vehicle_texture_rects.append(texture_rect)
-                    self._draw_vehicle_shadow(vehicle)
                     continue
                 self._draw_vehicle(vehicle)
             self._profile_add("draw_scene.vehicles", profile_stage)
@@ -1661,7 +1660,6 @@ class ClusterUiRenderer:
             and (not vehicle.source or vehicle.primary or vehicle.cut_in)
         )
         if use_model:
-            self._draw_vehicle_shadow(vehicle)
             self._draw_vehicle_model(vehicle)
             return
         if vehicle.source and (source_marker or (not vehicle.primary and not vehicle.cut_in)):
@@ -1670,7 +1668,7 @@ class ClusterUiRenderer:
         self._draw_vehicle_box(vehicle)
 
     def _draw_vehicle_marker(self, vehicle: VehicleBox) -> None:
-        self._draw_low_poly_vehicle(vehicle, marker=True)
+        self._draw_smooth_vehicle_blob(vehicle, marker=True)
 
     def _draw_radar_point(self, point: RadarPointMarker) -> None:
         color = point.color
@@ -1717,7 +1715,7 @@ class ClusterUiRenderer:
             absolute_speed_kph=point.absolute_speed_kph,
             acceleration_mps2=point.relative_accel_mps2,
         )
-        self._draw_low_poly_vehicle(vehicle, marker=True)
+        self._draw_smooth_vehicle_blob(vehicle, marker=True)
 
     def _draw_radar_point_labels(
         self,
@@ -1823,31 +1821,6 @@ class ClusterUiRenderer:
         self._profile_add_elapsed("draw_scene.radar_labels.project", project_ms)
         self._profile_add_elapsed("draw_scene.radar_labels.layout", layout_ms)
         self._profile_add_elapsed("draw_scene.radar_labels.text", text_ms)
-
-    def _draw_vehicle_shadow(self, vehicle: VehicleBox) -> None:
-        half_width = vehicle.width_m * 0.5
-        half_length = vehicle.length_m * 0.5
-
-        def corner(local_x: float, local_y: float, z: float) -> Vec3:
-            return Vec3(
-                vehicle.center.x + vehicle.right_x * local_x + vehicle.forward_x * local_y,
-                vehicle.center.y + vehicle.right_y * local_x + vehicle.forward_y * local_y,
-                z,
-            )
-
-        shadow = (
-            corner(-half_width * 1.12, -half_length * 1.08, 0.018),
-            corner(half_width * 1.12, -half_length * 1.08, 0.018),
-            corner(half_width * 1.12, half_length * 1.08, 0.018),
-            corner(-half_width * 1.12, half_length * 1.08, 0.018),
-        )
-        self._draw_quad(
-            shadow[0],
-            shadow[1],
-            shadow[2],
-            shadow[3],
-            (0, 0, 0, int(18 + 34 * clamp(vehicle.confidence, 0.0, 1.0))),
-        )
 
     def _draw_vehicle_model(self, vehicle: VehicleBox) -> None:
         if self._vehicle_model is None:
@@ -1992,19 +1965,14 @@ class ClusterUiRenderer:
         )
 
     def _draw_vehicle_box(self, vehicle: VehicleBox) -> None:
-        self._draw_low_poly_vehicle(vehicle, marker=False)
+        self._draw_smooth_vehicle_blob(vehicle, marker=False)
 
-    def _draw_low_poly_vehicle(self, vehicle: VehicleBox, marker: bool) -> None:
-        half_width = vehicle.width_m * (0.38 if marker else 0.5)
-        half_length = vehicle.length_m * (0.40 if marker else 0.5)
+    def _draw_smooth_vehicle_blob(self, vehicle: VehicleBox, marker: bool) -> None:
+        half_width = vehicle.width_m * 0.5
+        half_length = vehicle.length_m * 0.5
         z0 = 0.035
-        body_z = vehicle.height_m * (0.34 if marker else 0.40) + z0
-        roof_z = vehicle.height_m * (0.58 if marker else 0.68) + z0
-        shoulder_width = half_width * 0.96
-        shoulder_length = half_length * 0.96
-        cabin_width = half_width * (0.44 if marker else 0.48)
-        cabin_rear = -half_length * 0.30
-        cabin_front = half_length * 0.22
+        height = vehicle.height_m * (0.68 if marker else 0.78)
+        corner_segments = 8
 
         def corner(local_x: float, local_y: float, z: float) -> Vec3:
             return Vec3(
@@ -2013,59 +1981,91 @@ class ClusterUiRenderer:
                 z,
             )
 
-        body_profile = (
-            (-shoulder_width * 0.62, -shoulder_length),
-            (shoulder_width * 0.62, -shoulder_length),
-            (shoulder_width, -shoulder_length * 0.54),
-            (shoulder_width * 0.92, shoulder_length * 0.56),
-            (shoulder_width * 0.48, shoulder_length),
-            (-shoulder_width * 0.48, shoulder_length),
-            (-shoulder_width * 0.92, shoulder_length * 0.56),
-            (-shoulder_width, -shoulder_length * 0.54),
-        )
-        base = tuple(corner(local_x * 1.04, local_y, z0) for local_x, local_y in body_profile)
-        shoulder = tuple(corner(local_x, local_y, body_z) for local_x, local_y in body_profile)
-        cabin_base = (
-            corner(-cabin_width, cabin_rear, body_z + 0.012),
-            corner(cabin_width, cabin_rear, body_z + 0.012),
-            corner(cabin_width * 0.84, cabin_front, body_z + 0.012),
-            corner(-cabin_width * 0.84, cabin_front, body_z + 0.012),
-        )
-        cabin_top = (
-            corner(-cabin_width * 0.72, cabin_rear * 0.88, roof_z),
-            corner(cabin_width * 0.72, cabin_rear * 0.88, roof_z),
-            corner(cabin_width * 0.66, cabin_front * 0.82, roof_z),
-            corner(-cabin_width * 0.66, cabin_front * 0.82, roof_z),
-        )
-        self._draw_vehicle_shadow(vehicle)
-        side_colors = (
-            vehicle.rear_color,
-            vehicle.side_color,
-            vehicle.side_color,
-            vehicle.body_color,
-            vehicle.body_color,
-            vehicle.side_color,
-            vehicle.side_color,
-            vehicle.rear_color,
-        )
-        for index, side_color in enumerate(side_colors):
-            next_index = (index + 1) % len(base)
-            self._draw_quad(base[index], base[next_index], shoulder[next_index], shoulder[index], side_color)
-        self._draw_polygon_fan(shoulder, vehicle.body_color)
-        self._draw_quad(cabin_base[0], cabin_base[1], cabin_top[1], cabin_top[0], vehicle.rear_color)
-        self._draw_quad(cabin_base[1], cabin_base[2], cabin_top[2], cabin_top[1], vehicle.side_color)
-        self._draw_quad(cabin_base[2], cabin_base[3], cabin_top[3], cabin_top[2], vehicle.body_color)
-        self._draw_quad(cabin_base[3], cabin_base[0], cabin_top[0], cabin_top[3], vehicle.side_color)
-        self._draw_quad(cabin_top[0], cabin_top[1], cabin_top[2], cabin_top[3], vehicle.top_highlight)
+        def scale_color(color: tuple[int, int, int, int], factor: float) -> tuple[int, int, int, int]:
+            r, g, b, a = rgba_key(color)
+            return (
+                int(clamp(r * factor, 0, 255)),
+                int(clamp(g * factor, 0, 255)),
+                int(clamp(b * factor, 0, 255)),
+                a,
+            )
 
-        outline = rl_color(vehicle.outline_color)
-        for index in range(len(shoulder)):
-            next_index = (index + 1) % len(shoulder)
-            rl.draw_line_3d(vec3(shoulder[index]), vec3(shoulder[next_index]), outline)
-        for index in range(len(cabin_top)):
-            next_index = (index + 1) % len(cabin_top)
-            rl.draw_line_3d(vec3(cabin_base[index]), vec3(cabin_top[index]), outline)
-            rl.draw_line_3d(vec3(cabin_top[index]), vec3(cabin_top[next_index]), outline)
+        def soften_color(color: tuple[int, int, int, int], amount: float) -> tuple[int, int, int, int]:
+            r, g, b, a = rgba_key(color)
+            return (
+                int(clamp(r + (255 - r) * amount, 0, 255)),
+                int(clamp(g + (255 - g) * amount, 0, 255)),
+                int(clamp(b + (255 - b) * amount, 0, 255)),
+                a,
+            )
+
+        def face_color(local_x: float, local_y: float, z_ratio: float) -> tuple[int, int, int, int]:
+            front = clamp((local_y / max(0.001, half_length) + 1.0) * 0.5, 0.0, 1.0)
+            side = clamp(abs(local_x) / max(0.001, half_width), 0.0, 1.0)
+            factor = 0.66 + 0.20 * front + 0.12 * z_ratio - 0.08 * side
+            return scale_color(vehicle.body_color, factor)
+
+        def rounded_rect_ring(width_scale: float, length_scale: float, radius_scale: float, z: float) -> tuple[Vec3, ...]:
+            hw = half_width * width_scale
+            hl = half_length * length_scale
+            radius = min(half_width * 0.56 * radius_scale, hw * 0.88, hl * 0.28)
+            points: list[Vec3] = []
+            specs = (
+                (hw - radius, -hl + radius, -math.pi * 0.5, 0.0),
+                (hw - radius, hl - radius, 0.0, math.pi * 0.5),
+                (-hw + radius, hl - radius, math.pi * 0.5, math.pi),
+                (-hw + radius, -hl + radius, math.pi, math.pi * 1.5),
+            )
+            for cx, cy, start, end in specs:
+                for step in range(corner_segments + 1):
+                    angle = start + (end - start) * step / corner_segments
+                    points.append(corner(cx + math.cos(angle) * radius, cy + math.sin(angle) * radius, z))
+            return tuple(points)
+
+        ring_specs = (
+            (0.72, 0.84, 0.72, 0.00),
+            (0.90, 0.95, 0.92, 0.14),
+            (1.00, 1.00, 1.00, 0.38),
+            (0.98, 0.99, 0.96, 0.66),
+            (0.88, 0.92, 0.82, 0.86),
+            (0.72, 0.78, 0.62, 1.00),
+        )
+        rings = tuple(
+            rounded_rect_ring(width_scale, length_scale, radius_scale, z0 + height * z_ratio)
+            for width_scale, length_scale, radius_scale, z_ratio in ring_specs
+        )
+
+        lower_cap = scale_color(vehicle.body_color, 0.56)
+        top_cap = soften_color(vehicle.body_color, 0.18)
+        self._draw_polygon_fan(rings[0], lower_cap)
+        for ring_index in range(len(rings) - 1):
+            lower = rings[ring_index]
+            upper = rings[ring_index + 1]
+            z_ratio = (ring_specs[ring_index][3] + ring_specs[ring_index + 1][3]) * 0.5
+            for index in range(len(lower)):
+                next_index = (index + 1) % len(lower)
+                world_x = (
+                    lower[index].x
+                    + lower[next_index].x
+                    + upper[index].x
+                    + upper[next_index].x
+                ) * 0.25 - vehicle.center.x
+                world_y = (
+                    lower[index].y
+                    + lower[next_index].y
+                    + upper[index].y
+                    + upper[next_index].y
+                ) * 0.25 - vehicle.center.y
+                local_x = world_x * vehicle.right_x + world_y * vehicle.right_y
+                local_y = world_x * vehicle.forward_x + world_y * vehicle.forward_y
+                self._draw_quad(
+                    lower[index],
+                    lower[next_index],
+                    upper[next_index],
+                    upper[index],
+                    face_color(local_x, local_y, z_ratio),
+                )
+        self._draw_polygon_fan(rings[-1], top_cap)
 
     def _draw_polygon_fan(self, points: tuple[Vec3, ...], color: tuple[int, int, int, int]) -> None:
         if len(points) < 3:
