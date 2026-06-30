@@ -539,6 +539,8 @@ class ClusterUiRenderer:
         self._nv12_pack_shader_locations: dict[str, int] = {}
         self._vehicle_model = None
         self._vehicle_model_load_attempted = False
+        self._vehicle_marker_model = None
+        self._vehicle_marker_model_load_attempted = False
         self._ego_vehicle_texture = None
         self._lfa_texture = None
         self._lfa_active_texture = None
@@ -634,6 +636,9 @@ class ClusterUiRenderer:
         self._load_vehicle_model()
         self._profile_add("renderer.open.load_vehicle_model", profile_stage)
         profile_stage = self._profile_start()
+        self._load_vehicle_marker_model()
+        self._profile_add("renderer.open.load_vehicle_marker_model", profile_stage)
+        profile_stage = self._profile_start()
         self._load_ego_vehicle_texture()
         self._profile_add("renderer.open.load_ego_vehicle_texture", profile_stage)
         profile_stage = self._profile_start()
@@ -696,7 +701,11 @@ class ClusterUiRenderer:
         if self._vehicle_model is not None:
             rl.unload_model(self._vehicle_model)
             self._vehicle_model = None
+        if self._vehicle_marker_model is not None:
+            rl.unload_model(self._vehicle_marker_model)
+            self._vehicle_marker_model = None
         self._vehicle_model_load_attempted = False
+        self._vehicle_marker_model_load_attempted = False
         self._route_video_size = None
         self._route_video_frame_id = None
         rl.close_window()
@@ -1298,6 +1307,28 @@ class ClusterUiRenderer:
             print(f"Cybertruck vehicle model load failed: {exc}")
             self._vehicle_model = None
 
+    def _load_vehicle_marker_model(self) -> None:
+        if self._vehicle_marker_model_load_attempted:
+            return
+        self._vehicle_marker_model_load_attempted = True
+        try:
+            profile_stage = self._profile_start()
+            mesh = self._vehicle_marker_mesh()
+            self._profile_add("vehicle_marker_model.build_mesh", profile_stage)
+            profile_stage = self._profile_start()
+            rl.upload_mesh(rl.ffi.addressof(mesh), False)
+            self._profile_add("vehicle_marker_model.upload_mesh", profile_stage)
+            profile_stage = self._profile_start()
+            model = rl.load_model_from_mesh(mesh)
+            self._profile_add("vehicle_marker_model.load_from_mesh", profile_stage)
+            if not rl.is_model_valid(model):
+                rl.unload_model(model)
+                return
+            self._vehicle_marker_model = model
+        except Exception as exc:
+            print(f"Vehicle marker model load failed: {exc}")
+            self._vehicle_marker_model = None
+
     def _load_ego_vehicle_texture(self) -> None:
         if self._ego_vehicle_texture is not None:
             return
@@ -1423,6 +1454,104 @@ class ClusterUiRenderer:
         vertex_count = len(mesh_vertices) // 3
         if vertex_count < 3 or vertex_count % 3 != 0:
             raise RuntimeError(f"invalid vehicle mesh vertex count: {vertex_count}")
+
+        mesh = rl.Mesh()
+        mesh.vertexCount = vertex_count
+        mesh.triangleCount = vertex_count // 3
+        mesh.vertices = self._alloc_float_array(mesh_vertices)
+        mesh.normals = self._alloc_float_array(mesh_normals)
+        mesh.colors = self._alloc_uchar_array(mesh_colors)
+        return mesh
+
+    def _vehicle_marker_mesh(self):
+        corner_segments = 6
+        half_width = 0.5
+        half_length = 0.5
+        ring_specs = (
+            (0.72, 0.84, 0.72, 0.00),
+            (0.90, 0.95, 0.92, 0.14),
+            (1.00, 1.00, 1.00, 0.38),
+            (0.98, 0.99, 0.96, 0.66),
+            (0.88, 0.92, 0.82, 0.86),
+            (0.72, 0.78, 0.62, 1.00),
+        )
+        mesh_vertices: list[float] = []
+        mesh_normals: list[float] = []
+        mesh_colors: list[int] = []
+
+        def rounded_rect_ring(width_scale: float, length_scale: float, radius_scale: float, z: float) -> tuple[tuple[float, float, float], ...]:
+            hw = half_width * width_scale
+            hl = half_length * length_scale
+            radius = min(half_width * 0.56 * radius_scale, hw * 0.88, hl * 0.28)
+            points: list[tuple[float, float, float]] = []
+            specs = (
+                (hw - radius, -hl + radius, -math.pi * 0.5, 0.0),
+                (hw - radius, hl - radius, 0.0, math.pi * 0.5),
+                (-hw + radius, hl - radius, math.pi * 0.5, math.pi),
+                (-hw + radius, -hl + radius, math.pi, math.pi * 1.5),
+            )
+            for cx, cy, start, end in specs:
+                for step in range(corner_segments + 1):
+                    angle = start + (end - start) * step / corner_segments
+                    points.append((cx + math.cos(angle) * radius, cy + math.sin(angle) * radius, z))
+            return tuple(points)
+
+        def triangle_normal(
+            p0: tuple[float, float, float],
+            p1: tuple[float, float, float],
+            p2: tuple[float, float, float],
+        ) -> tuple[float, float, float]:
+            ux, uy, uz = p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]
+            vx, vy, vz = p2[0] - p0[0], p2[1] - p0[1], p2[2] - p0[2]
+            nx = uy * vz - uz * vy
+            ny = uz * vx - ux * vz
+            nz = ux * vy - uy * vx
+            length = math.sqrt(nx * nx + ny * ny + nz * nz)
+            if length <= 0.000001:
+                return 0.0, 0.0, 1.0
+            return nx / length, ny / length, nz / length
+
+        def shade_for(points: tuple[tuple[float, float, float], ...]) -> int:
+            x = sum(point[0] for point in points) / len(points)
+            y = sum(point[1] for point in points) / len(points)
+            z = sum(point[2] for point in points) / len(points)
+            front = clamp((y / half_length + 1.0) * 0.5, 0.0, 1.0)
+            side = clamp(abs(x) / half_width, 0.0, 1.0)
+            factor = clamp(0.58 + 0.20 * front + 0.22 * z - 0.10 * side, 0.52, 1.0)
+            return int(255 * factor)
+
+        def append_triangle(
+            p0: tuple[float, float, float],
+            p1: tuple[float, float, float],
+            p2: tuple[float, float, float],
+            shade: int | None = None,
+        ) -> None:
+            normal = triangle_normal(p0, p1, p2)
+            draw_shade = shade_for((p0, p1, p2)) if shade is None else shade
+            for point in (p0, p1, p2):
+                mesh_vertices.extend(point)
+                mesh_normals.extend(normal)
+                mesh_colors.extend((draw_shade, draw_shade, draw_shade, 255))
+
+        rings = tuple(
+            rounded_rect_ring(width_scale, length_scale, radius_scale, z_ratio)
+            for width_scale, length_scale, radius_scale, z_ratio in ring_specs
+        )
+        for index in range(1, len(rings[0]) - 1):
+            append_triangle(rings[0][0], rings[0][index + 1], rings[0][index], 142)
+        for ring_index in range(len(rings) - 1):
+            lower = rings[ring_index]
+            upper = rings[ring_index + 1]
+            for index in range(len(lower)):
+                next_index = (index + 1) % len(lower)
+                append_triangle(lower[index], lower[next_index], upper[next_index])
+                append_triangle(lower[index], upper[next_index], upper[index])
+        for index in range(1, len(rings[-1]) - 1):
+            append_triangle(rings[-1][0], rings[-1][index], rings[-1][index + 1], 255)
+
+        vertex_count = len(mesh_vertices) // 3
+        if vertex_count < 3 or vertex_count % 3 != 0:
+            raise RuntimeError(f"invalid marker mesh vertex count: {vertex_count}")
 
         mesh = rl.Mesh()
         mesh.vertexCount = vertex_count
@@ -1968,123 +2097,18 @@ class ClusterUiRenderer:
         self._draw_smooth_vehicle_blob(vehicle, marker=False)
 
     def _draw_smooth_vehicle_blob(self, vehicle: VehicleBox, marker: bool) -> None:
-        half_width = vehicle.width_m * 0.5
-        half_length = vehicle.length_m * 0.5
-        z0 = 0.035
-        height = vehicle.height_m * (0.68 if marker else 0.78)
-        corner_segments = 8
-
-        def corner(local_x: float, local_y: float, z: float) -> Vec3:
-            return Vec3(
-                vehicle.center.x + vehicle.right_x * local_x + vehicle.forward_x * local_y,
-                vehicle.center.y + vehicle.right_y * local_x + vehicle.forward_y * local_y,
-                z,
-            )
-
-        def scale_color(color: tuple[int, int, int, int], factor: float) -> tuple[int, int, int, int]:
-            r, g, b, a = rgba_key(color)
-            return (
-                int(clamp(r * factor, 0, 255)),
-                int(clamp(g * factor, 0, 255)),
-                int(clamp(b * factor, 0, 255)),
-                a,
-            )
-
-        def soften_color(color: tuple[int, int, int, int], amount: float) -> tuple[int, int, int, int]:
-            r, g, b, a = rgba_key(color)
-            return (
-                int(clamp(r + (255 - r) * amount, 0, 255)),
-                int(clamp(g + (255 - g) * amount, 0, 255)),
-                int(clamp(b + (255 - b) * amount, 0, 255)),
-                a,
-            )
-
-        def face_color(local_x: float, local_y: float, z_ratio: float) -> tuple[int, int, int, int]:
-            front = clamp((local_y / max(0.001, half_length) + 1.0) * 0.5, 0.0, 1.0)
-            side = clamp(abs(local_x) / max(0.001, half_width), 0.0, 1.0)
-            factor = 0.66 + 0.20 * front + 0.12 * z_ratio - 0.08 * side
-            return scale_color(vehicle.body_color, factor)
-
-        def rounded_rect_ring(width_scale: float, length_scale: float, radius_scale: float, z: float) -> tuple[Vec3, ...]:
-            hw = half_width * width_scale
-            hl = half_length * length_scale
-            radius = min(half_width * 0.56 * radius_scale, hw * 0.88, hl * 0.28)
-            points: list[Vec3] = []
-            specs = (
-                (hw - radius, -hl + radius, -math.pi * 0.5, 0.0),
-                (hw - radius, hl - radius, 0.0, math.pi * 0.5),
-                (-hw + radius, hl - radius, math.pi * 0.5, math.pi),
-                (-hw + radius, -hl + radius, math.pi, math.pi * 1.5),
-            )
-            for cx, cy, start, end in specs:
-                for step in range(corner_segments + 1):
-                    angle = start + (end - start) * step / corner_segments
-                    points.append(corner(cx + math.cos(angle) * radius, cy + math.sin(angle) * radius, z))
-            return tuple(points)
-
-        ring_specs = (
-            (0.72, 0.84, 0.72, 0.00),
-            (0.90, 0.95, 0.92, 0.14),
-            (1.00, 1.00, 1.00, 0.38),
-            (0.98, 0.99, 0.96, 0.66),
-            (0.88, 0.92, 0.82, 0.86),
-            (0.72, 0.78, 0.62, 1.00),
-        )
-        rings = tuple(
-            rounded_rect_ring(width_scale, length_scale, radius_scale, z0 + height * z_ratio)
-            for width_scale, length_scale, radius_scale, z_ratio in ring_specs
-        )
-
-        lower_cap = scale_color(vehicle.body_color, 0.56)
-        top_cap = soften_color(vehicle.body_color, 0.18)
-        self._draw_polygon_fan(rings[0], lower_cap)
-        for ring_index in range(len(rings) - 1):
-            lower = rings[ring_index]
-            upper = rings[ring_index + 1]
-            z_ratio = (ring_specs[ring_index][3] + ring_specs[ring_index + 1][3]) * 0.5
-            for index in range(len(lower)):
-                next_index = (index + 1) % len(lower)
-                world_x = (
-                    lower[index].x
-                    + lower[next_index].x
-                    + upper[index].x
-                    + upper[next_index].x
-                ) * 0.25 - vehicle.center.x
-                world_y = (
-                    lower[index].y
-                    + lower[next_index].y
-                    + upper[index].y
-                    + upper[next_index].y
-                ) * 0.25 - vehicle.center.y
-                local_x = world_x * vehicle.right_x + world_y * vehicle.right_y
-                local_y = world_x * vehicle.forward_x + world_y * vehicle.forward_y
-                self._draw_quad(
-                    lower[index],
-                    lower[next_index],
-                    upper[next_index],
-                    upper[index],
-                    face_color(local_x, local_y, z_ratio),
-                )
-        self._draw_polygon_fan(rings[-1], top_cap)
-
-    def _draw_polygon_fan(self, points: tuple[Vec3, ...], color: tuple[int, int, int, int]) -> None:
-        if len(points) < 3:
+        if self._vehicle_marker_model is None:
             return
-        draw_color = rl_color(color)
-        for index in range(1, len(points) - 1):
-            rl.draw_triangle_3d(vec3(points[0]), vec3(points[index]), vec3(points[index + 1]), draw_color)
-
-    def _draw_quad(
-        self,
-        p0: Vec3,
-        p1: Vec3,
-        p2: Vec3,
-        p3: Vec3,
-        color: tuple[int, int, int, int],
-    ) -> None:
-        draw_color = rl_color(color)
-        rl.draw_triangle_3d(vec3(p0), vec3(p1), vec3(p2), draw_color)
-        rl.draw_triangle_3d(vec3(p0), vec3(p2), vec3(p3), draw_color)
+        yaw_deg = math.degrees(math.atan2(-vehicle.forward_x, vehicle.forward_y))
+        position = rl.Vector3(vehicle.center.x, vehicle.center.y, 0.035)
+        rotation_axis = rl.Vector3(0.0, 0.0, 1.0)
+        height = vehicle.height_m * (0.68 if marker else 0.78)
+        scale = rl.Vector3(vehicle.width_m, vehicle.length_m, height)
+        try:
+            rl.rl_disable_backface_culling()
+            rl.draw_model_ex(self._vehicle_marker_model, position, rotation_axis, yaw_deg, scale, rl_color(vehicle.body_color))
+        finally:
+            rl.rl_enable_backface_culling()
 
     def _draw_hud(self, state: ClusterUiState, signal_lights: tuple[bool, bool] | None = None) -> None:
         if signal_lights is None:
