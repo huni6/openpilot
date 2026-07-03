@@ -1,0 +1,107 @@
+from __future__ import annotations
+
+import json
+import os
+import time
+from typing import Any
+
+from aiohttp import web
+
+from ..config import (
+  PHONE_MEDIA_ART_BASE64_MAX_CHARS,
+  PHONE_MEDIA_PATH,
+  PHONE_MEDIA_TEXT_MAX_CHARS,
+)
+
+
+def _safe_int(value: Any) -> int | None:
+  if isinstance(value, bool):
+    return None
+  try:
+    parsed = int(value)
+  except (TypeError, ValueError):
+    return None
+  return parsed if parsed >= 0 else None
+
+
+def _safe_bool(value: Any) -> bool:
+  if isinstance(value, bool):
+    return value
+  if isinstance(value, (int, float)):
+    return value != 0
+  if isinstance(value, str):
+    return value.strip().lower() in ("1", "true", "yes", "on")
+  return False
+
+
+def _safe_text(body: dict[str, Any], key: str, limit: int = PHONE_MEDIA_TEXT_MAX_CHARS) -> str:
+  value = body.get(key)
+  if value is None:
+    return ""
+  return str(value).strip()[:limit]
+
+
+def _normalize_phone_media(body: dict[str, Any]) -> dict[str, Any]:
+  art_base64 = _safe_text(body, "artBase64", PHONE_MEDIA_ART_BASE64_MAX_CHARS + 1)
+  if len(art_base64) > PHONE_MEDIA_ART_BASE64_MAX_CHARS:
+    art_base64 = ""
+  now_ms = int(time.time() * 1000.0)
+  return {
+    "title": _safe_text(body, "title"),
+    "artist": _safe_text(body, "artist"),
+    "package": _safe_text(body, "package", 120),
+    "isPlaying": _safe_bool(body.get("isPlaying")),
+    "durationMs": _safe_int(body.get("durationMs")),
+    "positionMs": _safe_int(body.get("positionMs")),
+    "artBase64": art_base64,
+    "artMime": _safe_text(body, "artMime", 80),
+    "artHash": _safe_text(body, "artHash", 160),
+    "updatedAtMs": _safe_int(body.get("updatedAtMs")) or now_ms,
+    "receivedAtMs": now_ms,
+  }
+
+
+def _write_json_atomic(path: str, data: dict[str, Any]) -> None:
+  directory = os.path.dirname(path)
+  if directory:
+    os.makedirs(directory, exist_ok=True)
+  tmp_path = f"{path}.tmp"
+  with open(tmp_path, "w", encoding="utf-8") as f:
+    json.dump(data, f, ensure_ascii=False, separators=(",", ":"))
+  os.replace(tmp_path, path)
+
+
+async def health(request: web.Request) -> web.Response:
+  return web.json_response({"ok": True, "phoneMedia": True})
+
+
+async def get_phone_media(request: web.Request) -> web.Response:
+  try:
+    with open(PHONE_MEDIA_PATH, "r", encoding="utf-8") as f:
+      media = json.load(f)
+  except FileNotFoundError:
+    media = {}
+  except Exception as exc:
+    return web.json_response({"ok": False, "error": str(exc)}, status=500)
+  return web.json_response({"ok": True, "media": media})
+
+
+async def set_phone_media(request: web.Request) -> web.Response:
+  try:
+    body = await request.json()
+  except Exception:
+    return web.json_response({"ok": False, "error": "invalid json"}, status=400)
+  if not isinstance(body, dict):
+    return web.json_response({"ok": False, "error": "invalid body"}, status=400)
+  media = _normalize_phone_media(body)
+  try:
+    _write_json_atomic(PHONE_MEDIA_PATH, media)
+  except Exception as exc:
+    return web.json_response({"ok": False, "error": str(exc)}, status=500)
+  return web.json_response({"ok": True, "path": PHONE_MEDIA_PATH})
+
+
+def register(app: web.Application) -> None:
+  app.router.add_get("/health", health)
+  app.router.add_get("/phone/media", get_phone_media)
+  app.router.add_post("/phone/media", set_phone_media)

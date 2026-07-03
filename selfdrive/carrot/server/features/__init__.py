@@ -4,6 +4,7 @@ from . import (
   cars,
   dashcam,
   params,
+  phone_media,
   screenrecord,
   settings,
   setting_favorites,
@@ -32,6 +33,7 @@ def register_all(app: web.Application) -> None:
   web_settings.register(app)
   ssh_keys.register(app)
   cars.register(app)
+  phone_media.register(app)
   system.register(app)
   terminal.register(app)
   dashcam.register(app)

@@ -163,7 +163,7 @@ class RealtimeBroker:
     return payload
 
   def capability_flags(self) -> list[str]:
-    flags = ["live", "camera-road", "road-only-ui", "carrotlink-projection"]
+    flags = ["live", "camera-road", "road-only-ui", "carrotlink-projection", "phone-media"]
     if "wideRoadCameraState" in self.service_names:
       flags.append("wide-meta")
     return flags

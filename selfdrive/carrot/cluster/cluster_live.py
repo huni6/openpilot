@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 import json
 import math
+import os
 import sys
 import time
 from pathlib import Path
@@ -18,6 +19,7 @@ from cluster_models import (
     NaviDebugInfo,
     NaviGuidanceImage,
     NaviTrafficLightInfo,
+    PhoneMediaInfo,
 )
 from cluster_route_replay import RouteLogParser, finite_float, frame_to_state, safe_get, safe_optional_float
 from cluster_utils import clamp
@@ -40,6 +42,13 @@ if OPENPILOT_ROOT is not None:
 LIVE_NAV_ROUTE_MAX_POINTS = 4096
 LIVE_NAVI_IMAGE_BASE64_MAX_CHARS = 2 * 1024 * 1024
 LIVE_NAVI_IMAGE_MAX_DIMENSION = 2048
+PHONE_MEDIA_READ_INTERVAL_SECONDS = 0.5
+PHONE_MEDIA_STALE_SECONDS = 15 * 60
+PHONE_MEDIA_ART_BASE64_MAX_CHARS = 512 * 1024
+PHONE_MEDIA_DEFAULT_PATHS = (
+    "/data/media/0/carrotlink_sidecar/phone_media.json",
+    "/tmp/carrotlink_phone_media.json",
+)
 
 
 def _limited_items(items: Any, max_items: int):
@@ -132,6 +141,9 @@ class OpenpilotLiveSource:
         self._nav_route_coords: tuple[tuple[float, float], ...] = ()
         self._nav_route_model_path: tuple[ModelPathPoint, ...] = ()
         self._nav_route_anchor: tuple[float, float, float] | None = None
+        self._phone_media_cache: PhoneMediaInfo | None = None
+        self._phone_media_last_read_t = 0.0
+        self._phone_media_paths = self._resolve_phone_media_paths()
         self._standby_state = standby_state()
         self.profile_enabled = False
         self._profile_samples: list[tuple[str, float]] = []
@@ -206,6 +218,7 @@ class OpenpilotLiveSource:
             state = frame_to_state(frame)
             self._profile_add("source.live.frame_to_state", profile_stage)
 
+            state = self._with_phone_media(state)
             self.last_state = self._with_debug_state(state)
             self.frames += 1
             return self.last_state
@@ -214,6 +227,7 @@ class OpenpilotLiveSource:
         state = self._standby_state
         self._profile_add("source.live.standby_state", profile_stage)
 
+        state = self._with_phone_media(state)
         self.last_state = self._with_debug_state(state)
         return self.last_state
 
@@ -273,6 +287,100 @@ class OpenpilotLiveSource:
 
     def close(self) -> None:
         return None
+
+    @staticmethod
+    def _resolve_phone_media_paths() -> tuple[Path, ...]:
+        paths: list[Path] = []
+        env_path = str(os.environ.get("CARROTLINK_PHONE_MEDIA_PATH", "")).strip()
+        if env_path:
+            paths.append(Path(env_path))
+        for value in PHONE_MEDIA_DEFAULT_PATHS:
+            candidate = Path(value)
+            if candidate not in paths:
+                paths.append(candidate)
+        return tuple(paths)
+
+    def _with_phone_media(self, state: ClusterUiState) -> ClusterUiState:
+        media = self._read_phone_media_info()
+        if media == state.phone_media:
+            return state
+        return replace(state, phone_media=media)
+
+    def _read_phone_media_info(self) -> PhoneMediaInfo | None:
+        now = time.monotonic()
+        if now - self._phone_media_last_read_t < PHONE_MEDIA_READ_INTERVAL_SECONDS:
+            return self._phone_media_cache
+        self._phone_media_last_read_t = now
+
+        selected_path: Path | None = None
+        for path in self._phone_media_paths:
+            try:
+                if path.is_file():
+                    selected_path = path
+                    break
+            except OSError:
+                continue
+        if selected_path is None:
+            self._phone_media_cache = None
+            return None
+
+        try:
+            stat = selected_path.stat()
+        except OSError:
+            self._phone_media_cache = None
+            return None
+        if time.time() - stat.st_mtime > PHONE_MEDIA_STALE_SECONDS:
+            self._phone_media_cache = None
+            return None
+        if stat.st_size > PHONE_MEDIA_ART_BASE64_MAX_CHARS + 32 * 1024:
+            return self._phone_media_cache
+
+        try:
+            data = json.loads(selected_path.read_text(encoding="utf-8"))
+        except Exception:
+            return self._phone_media_cache
+        if not isinstance(data, dict):
+            self._phone_media_cache = None
+            return None
+
+        def text_value(name: str, limit: int) -> str:
+            value = data.get(name)
+            if value is None:
+                return ""
+            text = str(value).strip()
+            return text[:limit]
+
+        def int_value(name: str) -> int | None:
+            value = data.get(name)
+            if isinstance(value, bool):
+                return None
+            try:
+                parsed = int(value)
+            except (TypeError, ValueError):
+                return None
+            return parsed if parsed >= 0 else None
+
+        title = text_value("title", 120)
+        artist = text_value("artist", 120)
+        art_base64 = text_value("artBase64", PHONE_MEDIA_ART_BASE64_MAX_CHARS)
+        if not title and not artist and not art_base64:
+            self._phone_media_cache = None
+            return None
+
+        media = PhoneMediaInfo(
+            title=title,
+            artist=artist,
+            package_name=text_value("package", 96),
+            is_playing=bool(data.get("isPlaying", False)),
+            duration_ms=int_value("durationMs"),
+            position_ms=int_value("positionMs"),
+            art_base64=art_base64,
+            art_mime=text_value("artMime", 64),
+            art_hash=text_value("artHash", 128),
+            updated_at_ms=int_value("updatedAtMs"),
+        )
+        self._phone_media_cache = media
+        return media
 
     def _apply_service_update(self, service: str, event_t: float) -> None:
         data = self.sm[service]

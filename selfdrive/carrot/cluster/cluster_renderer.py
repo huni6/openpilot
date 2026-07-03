@@ -23,6 +23,7 @@ from cluster_config import (
     CLUSTER_RADAR_INFO_VEHICLE_SPEED,
     CLUSTER_RADAR_INFO_VEHICLE_SPEED_DISTANCE,
     CLUSTER_RADAR_SOURCE_COLOR_BY_SOURCE,
+    CLUSTER_SCREEN_MODE_DEFAULT,
     CLUSTER_SCREEN_MODE_DEBUG,
     CLUSTER_SCREEN_MODE_DEBUG_GRAPH,
     CLUSTER_SCREEN_MODE_DEBUG_GRAPH_RIGHT,
@@ -50,6 +51,7 @@ from cluster_models import (
     NaviDebugInfo,
     NaviGuidanceImage,
     NaviTrafficLightInfo,
+    PhoneMediaInfo,
     RouteOverlay,
 )
 from cluster_scene import (
@@ -171,6 +173,18 @@ FPS_STATUS_DOT_TEXT_GAP = 6
 FPS_STATUS_MAX_TEXT_W = 220
 CLUSTER_CORE_USAGE_MARGIN = 2
 CLUSTER_CORE_USAGE_MAX_TEXT_W = 760
+PHONE_MEDIA_X = 1378.0
+PHONE_MEDIA_Y = 150.0
+PHONE_MEDIA_W = 442.0
+PHONE_MEDIA_ART_SIZE = 140.0
+PHONE_MEDIA_TEXT_X = PHONE_MEDIA_X + PHONE_MEDIA_ART_SIZE + 24.0
+PHONE_MEDIA_TITLE_Y = PHONE_MEDIA_Y + 45.0
+PHONE_MEDIA_ARTIST_Y = PHONE_MEDIA_Y + 100.0
+PHONE_MEDIA_PROGRESS_Y = PHONE_MEDIA_Y + 205.0
+PHONE_MEDIA_TITLE_SIZE = 38.0
+PHONE_MEDIA_ARTIST_SIZE = 24.0
+PHONE_MEDIA_TIME_SIZE = 18.0
+PHONE_MEDIA_PROGRESS_H = 6.0
 RADAR_LABEL_DISTANCE_FONT_SIZE = 16
 RADAR_LABEL_SPEED_FONT_SIZE = 14
 VEHICLE_BADGE_DISTANCE_FONT_SIZE = 17
@@ -364,6 +378,17 @@ def vehicle_speed_label(vehicle: VehicleBox) -> str:
     return f"{vehicle.absolute_speed_kph:.0f} km/h"
 
 
+def format_duration_ms(value: int | None) -> str:
+    if value is None or value < 0:
+        return "--:--"
+    total_seconds = int(round(value / 1000.0))
+    minutes, seconds = divmod(total_seconds, 60)
+    if minutes >= 60:
+        hours, minutes = divmod(minutes, 60)
+        return f"{hours:d}:{minutes:02d}:{seconds:02d}"
+    return f"{minutes:02d}:{seconds:02d}"
+
+
 def radar_info_shows_vehicle(mode: int) -> bool:
     return mode in (
         CLUSTER_RADAR_INFO_VEHICLE_SPEED,
@@ -547,6 +572,9 @@ class ClusterUiRenderer:
         self._navi_guidance_texture = None
         self._navi_guidance_hash = ""
         self._navi_guidance_size: tuple[int, int] | None = None
+        self._phone_media_art_texture = None
+        self._phone_media_art_hash = ""
+        self._phone_media_art_size: tuple[int, int] | None = None
         self._route_video_texture = None
         self._route_video_size: tuple[int, int] | None = None
         self._route_video_frame_id: str | None = None
@@ -693,6 +721,11 @@ class ClusterUiRenderer:
             self._navi_guidance_texture = None
             self._navi_guidance_hash = ""
             self._navi_guidance_size = None
+        if self._phone_media_art_texture is not None:
+            rl.unload_texture(self._phone_media_art_texture)
+            self._phone_media_art_texture = None
+            self._phone_media_art_hash = ""
+            self._phone_media_art_size = None
         if self._owns_font and self._font is not None:
             rl.unload_font(self._font)
         self._font = None
@@ -2166,6 +2199,11 @@ class ClusterUiRenderer:
             profile_stage = self._profile_start()
             self._draw_actual_fps(state.actual_fps)
             self._profile_add("hud.actual_fps", profile_stage)
+            phone_media_drawn = False
+            if screen_mode == CLUSTER_SCREEN_MODE_DEFAULT and not navi_active:
+                profile_stage = self._profile_start()
+                phone_media_drawn = self._draw_phone_media_panel(state.phone_media)
+                self._profile_add("hud.phone_media", profile_stage)
             if screen_mode == CLUSTER_SCREEN_MODE_DEBUG:
                 profile_stage = self._profile_start()
                 self._draw_live_debug_panel(state)
@@ -2194,7 +2232,7 @@ class ClusterUiRenderer:
                 CLUSTER_SCREEN_MODE_DEBUG_GRAPH,
                 CLUSTER_SCREEN_MODE_DEBUG_GRAPH_RIGHT,
                 CLUSTER_SCREEN_MODE_NAVI_DEBUG,
-            ) and not navi_active:
+            ) and not navi_active and not phone_media_drawn:
                 profile_stage = self._profile_start()
                 self._draw_route_overlay(state.route_overlay)
                 self._profile_add("hud.route_overlay", profile_stage)
@@ -2233,6 +2271,92 @@ class ClusterUiRenderer:
         rl.draw_rectangle_rounded(rect, 0.28, 12, rl_color(theme.clock_bg))
         rl.draw_rectangle_rounded_lines_ex(rect, 0.28, 12, 2.0, rl_color(theme.clock_outline))
         self._draw_text(text, x, y, size, theme.clock_text, anchor="center")
+
+    def _draw_phone_media_panel(self, media: PhoneMediaInfo | None) -> bool:
+        if media is None or not (media.title or media.artist or media.art_base64):
+            if self._phone_media_art_texture is not None:
+                rl.unload_texture(self._phone_media_art_texture)
+                self._phone_media_art_texture = None
+                self._phone_media_art_hash = ""
+                self._phone_media_art_size = None
+            return False
+
+        theme = self._current_theme()
+        text_w = PHONE_MEDIA_W - PHONE_MEDIA_ART_SIZE - 24.0
+        title = self._ellipsize_text(media.title or "Now playing", PHONE_MEDIA_TITLE_SIZE, text_w)
+        artist = self._ellipsize_text(media.artist or "", PHONE_MEDIA_ARTIST_SIZE, text_w)
+        texture = self._phone_media_art_texture_for(media)
+
+        if texture is not None and texture.width > 0 and texture.height > 0:
+            source = rl.Rectangle(0.0, 0.0, float(texture.width), float(texture.height))
+            dest = rl.Rectangle(PHONE_MEDIA_X, PHONE_MEDIA_Y, PHONE_MEDIA_ART_SIZE, PHONE_MEDIA_ART_SIZE)
+            rl.draw_texture_pro(texture, source, dest, rl.Vector2(0.0, 0.0), 0.0, rl_color(WHITE))
+            rl.draw_rectangle_rounded_lines_ex(dest, 0.12, 10, 2.0, rl_color(theme.faint, 110))
+        else:
+            self._rounded_rect(PHONE_MEDIA_X, PHONE_MEDIA_Y, PHONE_MEDIA_ART_SIZE, PHONE_MEDIA_ART_SIZE, 18.0, theme.panel_bg, theme.faint, 2.0)
+
+        self._draw_text(title, PHONE_MEDIA_TEXT_X, PHONE_MEDIA_TITLE_Y, PHONE_MEDIA_TITLE_SIZE, theme.text)
+        if artist:
+            self._draw_text(artist, PHONE_MEDIA_TEXT_X, PHONE_MEDIA_ARTIST_Y, PHONE_MEDIA_ARTIST_SIZE, theme.muted)
+        elif not media.is_playing:
+            self._draw_text("Paused", PHONE_MEDIA_TEXT_X, PHONE_MEDIA_ARTIST_Y, PHONE_MEDIA_ARTIST_SIZE, theme.muted)
+
+        if media.duration_ms is not None and media.duration_ms > 0 and media.position_ms is not None:
+            progress = clamp(media.position_ms / max(1.0, float(media.duration_ms)), 0.0, 1.0)
+            bg_rect = rl.Rectangle(PHONE_MEDIA_X, PHONE_MEDIA_PROGRESS_Y, PHONE_MEDIA_W, PHONE_MEDIA_PROGRESS_H)
+            fg_rect = rl.Rectangle(PHONE_MEDIA_X, PHONE_MEDIA_PROGRESS_Y, PHONE_MEDIA_W * progress, PHONE_MEDIA_PROGRESS_H)
+            rl.draw_rectangle_rounded(bg_rect, 0.5, 8, rl_color(theme.faint, 120))
+            rl.draw_rectangle_rounded(fg_rect, 0.5, 8, rl_color(BLUE))
+            time_y = PHONE_MEDIA_PROGRESS_Y + 22.0
+            self._draw_text(format_duration_ms(media.position_ms), PHONE_MEDIA_X, time_y, PHONE_MEDIA_TIME_SIZE, theme.muted)
+            self._draw_text(format_duration_ms(media.duration_ms), PHONE_MEDIA_X + PHONE_MEDIA_W, time_y, PHONE_MEDIA_TIME_SIZE, theme.muted, anchor="right")
+        return True
+
+    def _phone_media_art_texture_for(self, media: PhoneMediaInfo | None):
+        art_hash = media.art_hash if media is not None else ""
+        art_base64 = media.art_base64 if media is not None else ""
+        if not art_hash and art_base64:
+            art_hash = str(hash(art_base64))
+        if not art_base64:
+            if self._phone_media_art_texture is not None:
+                rl.unload_texture(self._phone_media_art_texture)
+                self._phone_media_art_texture = None
+                self._phone_media_art_hash = ""
+                self._phone_media_art_size = None
+            return None
+        if self._phone_media_art_texture is not None and art_hash == self._phone_media_art_hash:
+            return self._phone_media_art_texture
+        if self._phone_media_art_texture is not None:
+            rl.unload_texture(self._phone_media_art_texture)
+            self._phone_media_art_texture = None
+            self._phone_media_art_hash = ""
+            self._phone_media_art_size = None
+        try:
+            payload = art_base64.split(",", 1)[1] if "," in art_base64[:64] else art_base64
+            image_bytes = base64.b64decode(payload, validate=False)
+        except Exception:
+            return None
+        art_mime = media.art_mime.lower() if media is not None else ""
+        extension = ".jpg" if "jpeg" in art_mime or "jpg" in art_mime else ".png"
+        loaded_image = None
+        try:
+            loaded_image = rl.load_image_from_memory(extension, image_bytes, len(image_bytes))
+            if not rl.is_image_valid(loaded_image):
+                return None
+            texture = rl.load_texture_from_image(loaded_image)
+            if not rl.is_texture_valid(texture):
+                rl.unload_texture(texture)
+                return None
+            rl.set_texture_filter(texture, rl.TextureFilter.TEXTURE_FILTER_BILINEAR)
+            self._phone_media_art_texture = texture
+            self._phone_media_art_hash = art_hash
+            self._phone_media_art_size = (int(texture.width), int(texture.height))
+            return self._phone_media_art_texture
+        except Exception:
+            return None
+        finally:
+            if loaded_image is not None and rl.is_image_valid(loaded_image):
+                rl.unload_image(loaded_image)
 
     def _draw_debug_plot(
         self,

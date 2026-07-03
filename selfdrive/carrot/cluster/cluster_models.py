@@ -116,6 +116,20 @@ class NaviGuidanceImage:
 
 
 @dataclass(frozen=True, slots=True)
+class PhoneMediaInfo:
+    title: str = ""
+    artist: str = ""
+    package_name: str = ""
+    is_playing: bool = False
+    duration_ms: int | None = None
+    position_ms: int | None = None
+    art_base64: str = ""
+    art_mime: str = ""
+    art_hash: str = ""
+    updated_at_ms: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class DetectedVehicle:
     label: str
     longitudinal_m: float
@@ -223,6 +237,7 @@ class ClusterUiState:
     live_debug: LiveDebugInfo | None = None
     debug_plot: DebugPlotSnapshot | None = None
     navi_debug: NaviDebugInfo | None = None
+    phone_media: PhoneMediaInfo | None = None
     debug_ui_visible: bool = False
     center_clock_text: str | None = None
     planned_speed_kph: float | None = None
