@@ -842,7 +842,14 @@ class ClusterUiRenderer:
         if signal_lights is None:
             signal_lights = self._turn_signal_lights(state)
         profile_stage = self._profile_start()
-        if self.screen_mode == CLUSTER_SCREEN_MODE_DEFAULT:
+        if self.screen_mode in (
+            CLUSTER_SCREEN_MODE_DEFAULT,
+            CLUSTER_SCREEN_MODE_DEBUG,
+            CLUSTER_SCREEN_MODE_DEBUG_SYSTEM,
+            CLUSTER_SCREEN_MODE_DEBUG_GRAPH,
+            CLUSTER_SCREEN_MODE_DEBUG_GRAPH_RIGHT,
+            CLUSTER_SCREEN_MODE_NAVI_DEBUG,
+        ):
             self._clear_ambient_dashboard()
             self._profile_add("render.ambient_clear", profile_stage)
             profile_stage = self._profile_start()
