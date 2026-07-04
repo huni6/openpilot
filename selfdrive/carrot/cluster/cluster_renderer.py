@@ -860,9 +860,12 @@ class ClusterUiRenderer:
                 self._profile_add("render.ambient_hud", profile_stage)
                 return
             except Exception as exc:
-                if not self._ambient_render_error_logged:
-                    print(f"Ambient cluster render failed; falling back to legacy HUD: {exc}", flush=True)
+                if os.environ.get("CLUSTER_AMBIENT_DEBUG") == "1" and not self._ambient_render_error_logged:
+                    print(f"Ambient cluster render recovered with minimal HUD: {exc}", flush=True)
                     self._ambient_render_error_logged = True
+                self._draw_ambient_minimal_dashboard(state)
+                self._profile_add("render.ambient_recovery", profile_stage)
+                return
         if self.screen_mode == CLUSTER_SCREEN_MODE_DEBUG_GRAPH:
             self._clear_world()
         else:
@@ -2394,7 +2397,25 @@ class ClusterUiRenderer:
         else:
             rl.clear_background(rl_color(AMBIENT_BG_CENTER))
         rect = rl.Rectangle(0.0, 0.0, float(DESIGN_WIDTH), float(DESIGN_HEIGHT))
-        rl.draw_rectangle_rounded_lines_ex(rect, 16.0 / DESIGN_HEIGHT, 24, 1.0, rl_color(AMBIENT_BORDER))
+        self._draw_rounded_rect_lines_safe(rect, 16.0 / DESIGN_HEIGHT, 24, 1.0, rl_color(AMBIENT_BORDER))
+
+    def _draw_ambient_minimal_dashboard(self, state: ClusterUiState) -> None:
+        sx = self.width / DESIGN_WIDTH
+        sy = self.height / DESIGN_HEIGHT
+        rl.rl_push_matrix()
+        rl.rl_scalef(sx, sy, 1.0)
+        try:
+            rl.clear_background(rl_color(AMBIENT_BG_CENTER))
+            speed = state.display_speed_kph if state.display_speed_kph is not None else state.speed_kph
+            speed_text = str(int(round(clamp(speed, 0.0, MAX_SPEED_KPH))))
+            gear_text = (state.gear_text or "-").strip().upper()[:2] or "-"
+            self._draw_plain_text(speed_text, AMBIENT_SPEED_CENTER_X, AMBIENT_SPEED_CENTER_Y, AMBIENT_SPEED_SIZE, WHITE, anchor="center")
+            self._draw_plain_text("km/h", AMBIENT_SPEED_UNIT_X, AMBIENT_SPEED_UNIT_Y, AMBIENT_SPEED_UNIT_SIZE, (107, 114, 128), anchor="center")
+            self._draw_plain_text(gear_text, AMBIENT_GEAR_X, AMBIENT_TOP_ROW_Y, AMBIENT_GEAR_SIZE, WHITE, anchor="center")
+            self._draw_plain_text(self._cruise_set_speed_text(state), AMBIENT_CRUISE_SPEED_X, AMBIENT_TOP_ROW_Y, AMBIENT_CRUISE_SPEED_SIZE, WHITE)
+            self._draw_plain_text(kst_clock_text(), AMBIENT_CLOCK_RIGHT_X, AMBIENT_CLOCK_Y, AMBIENT_CLOCK_SIZE, (229, 231, 235), anchor="right")
+        finally:
+            rl.rl_pop_matrix()
 
     def _draw_ambient_bsm_edges(self, state: ClusterUiState) -> None:
         left_active, right_active = ambient_bsm_edges(state.left_blindspot, state.right_blindspot)
@@ -2754,8 +2775,8 @@ class ClusterUiRenderer:
             text_height + pad_y * 2,
         )
 
-        rl.draw_rectangle_rounded(rect, 0.28, 12, rl_color(theme.clock_bg))
-        rl.draw_rectangle_rounded_lines_ex(rect, 0.28, 12, 2.0, rl_color(theme.clock_outline))
+        self._draw_rounded_rect_safe(rect, 0.28, 12, rl_color(theme.clock_bg))
+        self._draw_rounded_rect_lines_safe(rect, 0.28, 12, 2.0, rl_color(theme.clock_outline))
         self._draw_text(text, x, y, size, theme.clock_text, anchor="center")
 
     def _draw_phone_media_panel(self, media: PhoneMediaInfo | None, ambient: bool = False) -> bool:
@@ -2786,7 +2807,7 @@ class ClusterUiRenderer:
                 dest = rl.Rectangle(PHONE_MEDIA_X, PHONE_MEDIA_Y, PHONE_MEDIA_ART_SIZE, PHONE_MEDIA_ART_SIZE)
                 border_dest = dest
             rl.draw_texture_pro(texture, source, dest, rl.Vector2(0.0, 0.0), 0.0, rl_color(WHITE))
-            rl.draw_rectangle_rounded_lines_ex(border_dest, 12.0 / PHONE_MEDIA_ART_SIZE, 10, 1.0, rl_color((255, 255, 255), 13 if ambient else 110))
+            self._draw_rounded_rect_lines_safe(border_dest, 12.0 / PHONE_MEDIA_ART_SIZE, 10, 1.0, rl_color((255, 255, 255), 13 if ambient else 110))
         else:
             self._rounded_rect(PHONE_MEDIA_X, PHONE_MEDIA_Y, PHONE_MEDIA_ART_SIZE, PHONE_MEDIA_ART_SIZE, 18.0, theme.panel_bg, theme.faint, 2.0)
 
@@ -2811,8 +2832,8 @@ class ClusterUiRenderer:
             fg_rect = rl.Rectangle(PHONE_MEDIA_X, PHONE_MEDIA_PROGRESS_Y, PHONE_MEDIA_W * progress, PHONE_MEDIA_PROGRESS_H)
             bg_color = (255, 255, 255, 26) if ambient else (*theme.faint, 120)
             fg_color = (59, 130, 246) if ambient else BLUE
-            rl.draw_rectangle_rounded(bg_rect, 0.5, 8, rl_color(bg_color))
-            rl.draw_rectangle_rounded(fg_rect, 0.5, 8, rl_color(fg_color))
+            self._draw_rounded_rect_safe(bg_rect, 0.5, 8, rl_color(bg_color))
+            self._draw_rounded_rect_safe(fg_rect, 0.5, 8, rl_color(fg_color))
             if ambient:
                 thumb_x = PHONE_MEDIA_X + PHONE_MEDIA_W * progress
                 thumb_y = PHONE_MEDIA_PROGRESS_Y + PHONE_MEDIA_PROGRESS_H * 0.5
@@ -3633,7 +3654,7 @@ class ClusterUiRenderer:
         theme = self._current_theme()
         video_rect = rl.Rectangle(x, y, width, height)
         profile_stage = self._profile_start()
-        rl.draw_rectangle_rounded(video_rect, 0.04, 10, rl_color(theme.route_video_bg))
+        self._draw_rounded_rect_safe(video_rect, 0.04, 10, rl_color(theme.route_video_bg))
         self._profile_add("route_video.background", profile_stage)
         if overlay.video_rgba is None or overlay.video_width <= 0 or overlay.video_height <= 0:
             status = overlay.video_status or "qcamera unavailable"
@@ -3805,7 +3826,7 @@ class ClusterUiRenderer:
         box_y = center_y - box_size * 0.5
         rect = rl.Rectangle(box_x, box_y, box_size, box_size)
         roundness = max(0.0, min(1.0, DRIVE_STATUS_BOX_RADIUS / max(1.0, box_size)))
-        rl.draw_rectangle_rounded_lines_ex(rect, roundness, 12, GEAR_STATUS_OUTLINE_WIDTH, rl_color(text_color))
+        self._draw_rounded_rect_lines_safe(rect, roundness, 12, GEAR_STATUS_OUTLINE_WIDTH, rl_color(text_color))
         self._draw_text(
             text,
             center_x,
@@ -4113,9 +4134,33 @@ class ClusterUiRenderer:
     ) -> None:
         rect = rl.Rectangle(x, y, width, height)
         roundness = max(0.0, min(1.0, radius / max(1.0, min(width, height))))
-        rl.draw_rectangle_rounded(rect, roundness, 12, rl_color(fill))
+        self._draw_rounded_rect_safe(rect, roundness, 12, rl_color(fill))
         if outline is not None and outline_width > 0:
-            rl.draw_rectangle_rounded_lines_ex(rect, roundness, 12, outline_width, rl_color(outline))
+            self._draw_rounded_rect_lines_safe(rect, roundness, 12, outline_width, rl_color(outline))
+
+    @staticmethod
+    def _draw_rounded_rect_safe(rect, roundness: float, segments: int, color) -> None:
+        draw_rounded = getattr(rl, "draw_rectangle_rounded", None)
+        if draw_rounded is not None:
+            draw_rounded(rect, roundness, segments, color)
+            return
+        draw_rec = getattr(rl, "draw_rectangle_rec", None)
+        if draw_rec is not None:
+            draw_rec(rect, color)
+            return
+        rl.draw_rectangle(int(rect.x), int(rect.y), int(rect.width), int(rect.height), color)
+
+    @staticmethod
+    def _draw_rounded_rect_lines_safe(rect, roundness: float, segments: int, line_thick: float, color) -> None:
+        draw_rounded_lines = getattr(rl, "draw_rectangle_rounded_lines_ex", None)
+        if draw_rounded_lines is not None:
+            draw_rounded_lines(rect, roundness, segments, line_thick, color)
+            return
+        draw_lines_ex = getattr(rl, "draw_rectangle_lines_ex", None)
+        if draw_lines_ex is not None:
+            draw_lines_ex(rect, line_thick, color)
+            return
+        rl.draw_rectangle_lines(int(rect.x), int(rect.y), int(rect.width), int(rect.height), color)
 
     def _rounded_rect_glow(
         self,
@@ -4171,6 +4216,30 @@ class ClusterUiRenderer:
             draw_x = x - text_width
             draw_y = y - text_height * 0.5
         rl.draw_text_ex(self._font, text, rl.Vector2(draw_x, draw_y), size, spacing, rl_color(color))
+
+    def _draw_plain_text(
+        self,
+        text: str,
+        x: float,
+        y: float,
+        size: float,
+        color: tuple[int, int, int],
+        anchor: str = "left",
+    ) -> None:
+        approx_width = len(text) * size * 0.56
+        approx_height = size
+        draw_x = x
+        draw_y = y - approx_height * 0.5
+        if anchor == "center":
+            draw_x = x - approx_width * 0.5
+        elif anchor == "right":
+            draw_x = x - approx_width
+        draw_text = getattr(rl, "draw_text", None)
+        if draw_text is not None:
+            draw_text(text, int(draw_x), int(draw_y), int(size), rl_color(color))
+            return
+        font = self._font or rl.get_font_default()
+        rl.draw_text_ex(font, text, rl.Vector2(draw_x, draw_y), size, max(1.0, size * 0.02), rl_color(color))
 
     def _draw_text_with_stroke(
         self,
