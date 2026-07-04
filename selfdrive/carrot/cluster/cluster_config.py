@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 DESIGN_WIDTH = 1920
 DESIGN_HEIGHT = 480
+KST_OFFSET_SECONDS = 9 * 60 * 60
 
 Color3 = tuple[int, int, int]
 Color4 = tuple[int, int, int, int]
@@ -447,6 +448,12 @@ def current_cluster_theme(mode: object = "auto", now: float | None = None) -> Cl
     if local_hour >= AUTO_DARK_START_HOUR or local_hour < AUTO_LIGHT_START_HOUR:
         return DARK_CLUSTER_THEME
     return LIGHT_CLUSTER_THEME
+
+
+def kst_clock_text(*, include_seconds: bool = False, now: float | None = None) -> str:
+    timestamp = time.time() if now is None else float(now)
+    fmt = "%H:%M:%S" if include_seconds else "%H:%M"
+    return time.strftime(fmt, time.gmtime(timestamp + KST_OFFSET_SECONDS))
 
 
 BG = LIGHT_CLUSTER_THEME.bg

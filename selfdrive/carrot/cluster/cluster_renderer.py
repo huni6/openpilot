@@ -40,6 +40,7 @@ from cluster_config import (
     TEXT,
     WHITE,
     current_cluster_theme,
+    kst_clock_text,
     normalize_cluster_screen_mode,
     normalize_cluster_theme_mode,
 )
@@ -632,6 +633,7 @@ class ClusterUiRenderer:
         self._phone_media_art_size: tuple[int, int] | None = None
         self._ambient_reference_texture = None
         self._ambient_reference_texture_path = ""
+        self._ambient_render_error_logged = False
         self._route_video_texture = None
         self._route_video_size: tuple[int, int] | None = None
         self._route_video_frame_id: str | None = None
@@ -853,9 +855,14 @@ class ClusterUiRenderer:
             self._clear_ambient_dashboard()
             self._profile_add("render.ambient_clear", profile_stage)
             profile_stage = self._profile_start()
-            self._draw_ambient_dashboard(state)
-            self._profile_add("render.ambient_hud", profile_stage)
-            return
+            try:
+                self._draw_ambient_dashboard(state)
+                self._profile_add("render.ambient_hud", profile_stage)
+                return
+            except Exception as exc:
+                if not self._ambient_render_error_logged:
+                    print(f"Ambient cluster render failed; falling back to legacy HUD: {exc}", flush=True)
+                    self._ambient_render_error_logged = True
         if self.screen_mode == CLUSTER_SCREEN_MODE_DEBUG_GRAPH:
             self._clear_world()
         else:
@@ -1508,13 +1515,37 @@ class ClusterUiRenderer:
             print(f"{label} icon load failed: {exc}")
             return None
 
+    @staticmethod
+    def _is_image_valid(image) -> bool:
+        if image is None:
+            return False
+        validator = getattr(rl, "is_image_valid", None)
+        if validator is not None:
+            try:
+                return bool(validator(image))
+            except Exception:
+                return False
+        return int(getattr(image, "width", 0) or 0) > 0 and int(getattr(image, "height", 0) or 0) > 0 and getattr(image, "data", None) is not None
+
+    @staticmethod
+    def _is_texture_valid(texture) -> bool:
+        if texture is None:
+            return False
+        validator = getattr(rl, "is_texture_valid", None)
+        if validator is not None:
+            try:
+                return bool(validator(texture))
+            except Exception:
+                return False
+        return int(getattr(texture, "id", 0) or 0) > 0
+
     def _load_recolored_icon_texture(self, path: Path, color: tuple[int, int, int], label: str):
         if not path.exists():
             return None
         image = None
         try:
             image = rl.load_image(str(path))
-            if not rl.is_image_valid(image):
+            if not self._is_image_valid(image):
                 return None
             if image.format != rl.PixelFormat.PIXELFORMAT_UNCOMPRESSED_R8G8B8A8:
                 rl.image_format(image, rl.PixelFormat.PIXELFORMAT_UNCOMPRESSED_R8G8B8A8)
@@ -1536,7 +1567,7 @@ class ClusterUiRenderer:
             print(f"{label} icon recolor failed: {exc}")
             return None
         finally:
-            if image is not None and rl.is_image_valid(image):
+            if self._is_image_valid(image):
                 rl.unload_image(image)
 
     def _load_lfa_active_texture(self):
@@ -1545,7 +1576,7 @@ class ClusterUiRenderer:
         image = None
         try:
             image = rl.load_image(str(LFA_ICON_PATH))
-            if not rl.is_image_valid(image):
+            if not self._is_image_valid(image):
                 return None
             if image.format != rl.PixelFormat.PIXELFORMAT_UNCOMPRESSED_R8G8B8A8:
                 rl.image_format(image, rl.PixelFormat.PIXELFORMAT_UNCOMPRESSED_R8G8B8A8)
@@ -1574,7 +1605,7 @@ class ClusterUiRenderer:
             print(f"LFA active icon load failed: {exc}")
             return None
         finally:
-            if image is not None and rl.is_image_valid(image):
+            if self._is_image_valid(image):
                 rl.unload_image(image)
 
     def _load_obj_mesh(self, path: Path):
@@ -2352,13 +2383,16 @@ class ClusterUiRenderer:
 
     def _draw_ambient_background(self) -> None:
         radius = math.hypot(DESIGN_WIDTH * 0.5, DESIGN_HEIGHT * 0.5)
-        rl.draw_circle_gradient(
-            int(DESIGN_WIDTH * 0.5),
-            int(DESIGN_HEIGHT * 0.5),
-            radius,
-            rl_color(AMBIENT_BG_CENTER),
-            rl_color(AMBIENT_BG_EDGE),
-        )
+        if hasattr(rl, "draw_circle_gradient"):
+            rl.draw_circle_gradient(
+                int(DESIGN_WIDTH * 0.5),
+                int(DESIGN_HEIGHT * 0.5),
+                radius,
+                rl_color(AMBIENT_BG_CENTER),
+                rl_color(AMBIENT_BG_EDGE),
+            )
+        else:
+            rl.clear_background(rl_color(AMBIENT_BG_CENTER))
         rect = rl.Rectangle(0.0, 0.0, float(DESIGN_WIDTH), float(DESIGN_HEIGHT))
         rl.draw_rectangle_rounded_lines_ex(rect, 16.0 / DESIGN_HEIGHT, 24, 1.0, rl_color(AMBIENT_BORDER))
 
@@ -2428,22 +2462,26 @@ class ClusterUiRenderer:
         fill_w = AMBIENT_POWER_FILL_W
         fill_h = AMBIENT_POWER_FILL_H
         half_h = fill_h * 0.5
-        rl.draw_rectangle_gradient_v(
-            int(fill_x),
-            int(fill_y),
-            int(fill_w),
-            int(math.ceil(half_h)),
-            rl_color((0, 122, 255)),
-            rl_color((125, 176, 227)),
-        )
-        rl.draw_rectangle_gradient_v(
-            int(fill_x),
-            int(fill_y + half_h),
-            int(fill_w),
-            int(math.ceil(half_h)),
-            rl_color((227, 130, 130)),
-            rl_color((255, 59, 48)),
-        )
+        if hasattr(rl, "draw_rectangle_gradient_v"):
+            rl.draw_rectangle_gradient_v(
+                int(fill_x),
+                int(fill_y),
+                int(fill_w),
+                int(math.ceil(half_h)),
+                rl_color((0, 122, 255)),
+                rl_color((125, 176, 227)),
+            )
+            rl.draw_rectangle_gradient_v(
+                int(fill_x),
+                int(fill_y + half_h),
+                int(fill_w),
+                int(math.ceil(half_h)),
+                rl_color((227, 130, 130)),
+                rl_color((255, 59, 48)),
+            )
+        else:
+            rl.draw_rectangle(int(fill_x), int(fill_y), int(fill_w), int(math.ceil(half_h)), rl_color((0, 122, 255)))
+            rl.draw_rectangle(int(fill_x), int(fill_y + half_h), int(fill_w), int(math.ceil(half_h)), rl_color((255, 59, 48)))
         rl.draw_circle_v(rl.Vector2(fill_x + fill_w * 0.5, fill_y), fill_w * 0.5, rl_color((0, 122, 255)))
         rl.draw_circle_v(rl.Vector2(fill_x + fill_w * 0.5, fill_y + fill_h), fill_w * 0.5, rl_color((255, 59, 48)))
 
@@ -2587,7 +2625,7 @@ class ClusterUiRenderer:
             )
 
     def _draw_ambient_clock(self, state: ClusterUiState) -> None:
-        raw_text = (state.center_clock_text or time.strftime("%H:%M")).strip()
+        raw_text = kst_clock_text().strip()
         text = raw_text[:5] if len(raw_text) >= 5 and raw_text[2] == ":" else raw_text
         self._draw_ambient_text(text, AMBIENT_CLOCK_RIGHT_X, AMBIENT_CLOCK_Y, AMBIENT_CLOCK_SIZE, (229, 231, 235), weight="light", anchor="right")
 
@@ -2817,13 +2855,13 @@ class ClusterUiRenderer:
         loaded_image = None
         try:
             loaded_image = rl.load_image_from_memory(extension, image_bytes, len(image_bytes))
-            if not rl.is_image_valid(loaded_image):
+            if not self._is_image_valid(loaded_image):
                 return None
             if loaded_image.width != int(PHONE_MEDIA_ART_CONTENT_SIZE) or loaded_image.height != int(PHONE_MEDIA_ART_CONTENT_SIZE):
                 rl.image_resize(loaded_image, int(PHONE_MEDIA_ART_CONTENT_SIZE), int(PHONE_MEDIA_ART_CONTENT_SIZE))
             self._apply_rounded_image_alpha(loaded_image, int(12))
             texture = rl.load_texture_from_image(loaded_image)
-            if not rl.is_texture_valid(texture):
+            if not self._is_texture_valid(texture):
                 rl.unload_texture(texture)
                 return None
             rl.set_texture_filter(texture, rl.TextureFilter.TEXTURE_FILTER_BILINEAR)
@@ -2834,7 +2872,7 @@ class ClusterUiRenderer:
         except Exception:
             return None
         finally:
-            if loaded_image is not None and rl.is_image_valid(loaded_image):
+            if self._is_image_valid(loaded_image):
                 rl.unload_image(loaded_image)
 
     @staticmethod
@@ -3321,10 +3359,10 @@ class ClusterUiRenderer:
         loaded_image = None
         try:
             loaded_image = rl.load_image_from_memory(extension, image_bytes, len(image_bytes))
-            if not rl.is_image_valid(loaded_image):
+            if not self._is_image_valid(loaded_image):
                 return None
             texture = rl.load_texture_from_image(loaded_image)
-            if not rl.is_texture_valid(texture):
+            if not self._is_texture_valid(texture):
                 rl.unload_texture(texture)
                 return None
             rl.set_texture_filter(texture, rl.TextureFilter.TEXTURE_FILTER_BILINEAR)
@@ -3335,7 +3373,7 @@ class ClusterUiRenderer:
         except Exception:
             return None
         finally:
-            if loaded_image is not None and rl.is_image_valid(loaded_image):
+            if self._is_image_valid(loaded_image):
                 rl.unload_image(loaded_image)
 
     def _draw_system_stats_panel(self, state: ClusterUiState) -> None:
@@ -4301,7 +4339,7 @@ class ClusterUiRenderer:
                 rl_color(color_key),
             )
             texture = rl.load_texture_from_image(image)
-            if hasattr(rl, "is_texture_valid") and not rl.is_texture_valid(texture):
+            if not self._is_texture_valid(texture):
                 rl.unload_texture(texture)
                 return None
         except Exception:

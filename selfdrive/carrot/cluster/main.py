@@ -33,6 +33,7 @@ from cluster_config import (
     CLUSTER_THEME_PARAM,
     DESIGN_HEIGHT,
     DESIGN_WIDTH,
+    kst_clock_text,
     normalize_cluster_brightness_percent,
     normalize_cluster_camera_view_mode,
     normalize_cluster_core_mode,
@@ -964,7 +965,7 @@ def run_demo(
             if live_source is not None:
                 profile_stage = time.perf_counter()
                 state = live_source.update()
-                center_clock_text = time.strftime("%H:%M:%S")
+                center_clock_text = kst_clock_text(include_seconds=True)
                 profile.add_samples(live_source.profile_samples())
                 profile.add_elapsed("source.live_update", profile_stage)
             elif route_source is not None:
