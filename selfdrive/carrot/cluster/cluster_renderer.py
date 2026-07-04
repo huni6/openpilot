@@ -54,6 +54,7 @@ from cluster_models import (
     PhoneMediaInfo,
     RouteOverlay,
 )
+from cluster_layout import ambient_bsm_edges, ambient_power_gauge
 from cluster_scene import (
     ClusterScene,
     MeshStrip,
@@ -73,9 +74,15 @@ OPENPILOT_FONT_DIR = SELFDRIVE_DIR / "assets" / "fonts"
 OPENPILOT_ADDON_FONT_DIR = SELFDRIVE_DIR / "assets" / "addon" / "font"
 KAIGEN_GOTHIC_KR_BOLD_FONT_PATH = OPENPILOT_FONT_DIR / "KaiGenGothicKR-Bold.ttf"
 JETBRAINS_MONO_FONT_PATH = OPENPILOT_FONT_DIR / "JetBrainsMono-Medium.ttf"
+INTER_LIGHT_FONT_PATH = OPENPILOT_FONT_DIR / "Inter-Light.ttf"
+INTER_REGULAR_FONT_PATH = OPENPILOT_FONT_DIR / "Inter-Regular.ttf"
+INTER_MEDIUM_FONT_PATH = OPENPILOT_FONT_DIR / "Inter-Medium.ttf"
+INTER_SEMIBOLD_FONT_PATH = OPENPILOT_FONT_DIR / "Inter-SemiBold.ttf"
 VEHICLE_MODEL_PATH = CLUSTER_DIR / "assets" / "models" / "cybertruck" / "cybertruck_cluster.obj"
 EGO_VEHICLE_TEXTURE_PATH = SELFDRIVE_DIR / "assets" / "icons_mici" / "ego_vehicle_custom.png"
-LFA_ICON_PATH = SELFDRIVE_DIR / "assets" / "icons_mici" / "carrot_wheel_org.png"
+LFA_ICON_PATH = SELFDRIVE_DIR / "assets" / "icons_mici" / "carrot_wheel_lane.png"
+AMBIENT_CRUISE_ICON_PATH = CLUSTER_DIR / "assets" / "ambient" / "cruise-set-icon.png"
+AMBIENT_LANE_ASSIST_ICON_PATH = CLUSTER_DIR / "assets" / "ambient" / "lane-assist-icon.png"
 ACCEL_TEXT_WIDTH_SAMPLES = ("+00.00", "-00.00")
 BLACK = (0, 0, 0)
 TURN_SIGNAL_LEFT_CENTER_X = 610
@@ -111,6 +118,49 @@ TOP_ICON_SIZE = 34.0 * DRIVE_STATUS_SCALE
 DRIVE_STATUS_BOX_RADIUS = 8.0 * DRIVE_STATUS_SCALE
 SPEED_VALUE_CENTER_X = 260
 SPEED_VALUE_CENTER_Y = 230
+AMBIENT_BODY_BG = (3, 7, 18)
+AMBIENT_BG_EDGE = (3, 5, 10)
+AMBIENT_BG_CENTER = (7, 13, 26)
+AMBIENT_BORDER = (255, 255, 255, 51)
+AMBIENT_SPEED_CENTER_X = 312.0
+AMBIENT_SPEED_CENTER_Y = 226.5
+AMBIENT_SPEED_SIZE = 230.0
+AMBIENT_SPEED_UNIT_X = 309.0
+AMBIENT_SPEED_UNIT_Y = 340.0
+AMBIENT_SPEED_UNIT_SIZE = 32.0
+AMBIENT_POWER_CENTER_X = 125.0
+AMBIENT_POWER_TRACK_X = 101.0
+AMBIENT_POWER_TRACK_Y = 118.0
+AMBIENT_POWER_TRACK_W = 48.0
+AMBIENT_POWER_TRACK_H = 244.0
+AMBIENT_POWER_FILL_X = 112.0
+AMBIENT_POWER_FILL_Y = 130.0
+AMBIENT_POWER_FILL_W = 26.0
+AMBIENT_POWER_FILL_H = 220.0
+AMBIENT_POWER_HANDLE_W = 40.0
+AMBIENT_POWER_HANDLE_H = 6.0
+AMBIENT_TOP_ROW_Y = 92.5
+AMBIENT_GEAR_X = 760.8
+AMBIENT_GEAR_SIZE = 52.0
+AMBIENT_DIVIDER_H = 42.0
+AMBIENT_CRUISE_ICON_X = 866.6
+AMBIENT_CRUISE_SPEED_X = 902.6
+AMBIENT_CRUISE_UNIT_X = 992.7
+AMBIENT_CRUISE_SPEED_SIZE = 56.0
+AMBIENT_CRUISE_UNIT_SIZE = 25.0
+AMBIENT_LFA_CENTER_X = 1142.0
+AMBIENT_LFA_ICON_SIZE = 66.0
+AMBIENT_GAP_X = 884.0
+AMBIENT_GAP_Y = 142.0
+AMBIENT_GAP_BAR_W = 30.0
+AMBIENT_GAP_BAR_H = 12.0
+AMBIENT_GAP_BAR_GAP = 10.0
+AMBIENT_CLOCK_RIGHT_X = 1818.0
+AMBIENT_CLOCK_Y = 85.5
+AMBIENT_CLOCK_SIZE = 50.0
+AMBIENT_BSM_W = 118.0
+AMBIENT_BSM_COLOR = (255, 116, 32)
+AMBIENT_TEXT_EDGE_BOOST_ALPHA = int(os.environ.get("CLUSTER_AMBIENT_TEXT_EDGE_BOOST_ALPHA", "80"))
 SPEED_LIMIT_SIGN_CENTER_X = 460
 SPEED_LIMIT_SIGN_CENTER_Y = TURN_SIGNAL_CENTER_Y
 SPEED_LIMIT_SIGN_RADIUS = 56.0
@@ -173,18 +223,19 @@ FPS_STATUS_DOT_TEXT_GAP = 6
 FPS_STATUS_MAX_TEXT_W = 220
 CLUSTER_CORE_USAGE_MARGIN = 2
 CLUSTER_CORE_USAGE_MAX_TEXT_W = 760
-PHONE_MEDIA_X = 1378.0
-PHONE_MEDIA_Y = 150.0
-PHONE_MEDIA_W = 442.0
-PHONE_MEDIA_ART_SIZE = 140.0
+PHONE_MEDIA_X = 1379.0
+PHONE_MEDIA_Y = 139.0
+PHONE_MEDIA_W = 440.0
+PHONE_MEDIA_ART_SIZE = 142.0
+PHONE_MEDIA_ART_CONTENT_SIZE = 140.0
 PHONE_MEDIA_TEXT_X = PHONE_MEDIA_X + PHONE_MEDIA_ART_SIZE + 24.0
-PHONE_MEDIA_TITLE_Y = PHONE_MEDIA_Y + 45.0
-PHONE_MEDIA_ARTIST_Y = PHONE_MEDIA_Y + 100.0
-PHONE_MEDIA_PROGRESS_Y = PHONE_MEDIA_Y + 205.0
-PHONE_MEDIA_TITLE_SIZE = 38.0
-PHONE_MEDIA_ARTIST_SIZE = 24.0
-PHONE_MEDIA_TIME_SIZE = 18.0
-PHONE_MEDIA_PROGRESS_H = 6.0
+PHONE_MEDIA_TITLE_Y = 189.5
+PHONE_MEDIA_ARTIST_Y = 240.5
+PHONE_MEDIA_PROGRESS_Y = 306.0
+PHONE_MEDIA_TITLE_SIZE = 49.0
+PHONE_MEDIA_ARTIST_SIZE = 30.0
+PHONE_MEDIA_TIME_SIZE = 15.0
+PHONE_MEDIA_PROGRESS_H = 4.0
 RADAR_LABEL_DISTANCE_FONT_SIZE = 16
 RADAR_LABEL_SPEED_FONT_SIZE = 14
 VEHICLE_BADGE_DISTANCE_FONT_SIZE = 17
@@ -550,6 +601,8 @@ class ClusterUiRenderer:
         self._window_open = False
         self._font = None
         self._owns_font = False
+        self._ambient_fonts: dict[str, object] = {}
+        self._owned_ambient_fonts: set[str] = set()
         self._accel_text_width = 0.0
         self._capture_target = None
         self._portrait_upload_target = None
@@ -569,12 +622,16 @@ class ClusterUiRenderer:
         self._ego_vehicle_texture = None
         self._lfa_texture = None
         self._lfa_active_texture = None
+        self._ambient_cruise_icon_texture = None
+        self._ambient_lane_assist_icon_texture = None
         self._navi_guidance_texture = None
         self._navi_guidance_hash = ""
         self._navi_guidance_size: tuple[int, int] | None = None
         self._phone_media_art_texture = None
         self._phone_media_art_hash = ""
         self._phone_media_art_size: tuple[int, int] | None = None
+        self._ambient_reference_texture = None
+        self._ambient_reference_texture_path = ""
         self._route_video_texture = None
         self._route_video_size: tuple[int, int] | None = None
         self._route_video_frame_id: str | None = None
@@ -661,6 +718,9 @@ class ClusterUiRenderer:
         self._font = self._load_font()
         self._profile_add("renderer.open.load_font", profile_stage)
         profile_stage = self._profile_start()
+        self._load_ambient_fonts()
+        self._profile_add("renderer.open.load_ambient_fonts", profile_stage)
+        profile_stage = self._profile_start()
         self._load_vehicle_model()
         self._profile_add("renderer.open.load_vehicle_model", profile_stage)
         profile_stage = self._profile_start()
@@ -672,6 +732,9 @@ class ClusterUiRenderer:
         profile_stage = self._profile_start()
         self._load_drive_status_textures()
         self._profile_add("renderer.open.load_drive_status_textures", profile_stage)
+        profile_stage = self._profile_start()
+        self._load_ambient_icon_textures()
+        self._profile_add("renderer.open.load_ambient_icon_textures", profile_stage)
         self._window_open = True
         self._profile_add("renderer.open.total", profile_total)
 
@@ -716,6 +779,12 @@ class ClusterUiRenderer:
         if self._lfa_active_texture is not None:
             rl.unload_texture(self._lfa_active_texture)
             self._lfa_active_texture = None
+        if self._ambient_cruise_icon_texture is not None:
+            rl.unload_texture(self._ambient_cruise_icon_texture)
+            self._ambient_cruise_icon_texture = None
+        if self._ambient_lane_assist_icon_texture is not None:
+            rl.unload_texture(self._ambient_lane_assist_icon_texture)
+            self._ambient_lane_assist_icon_texture = None
         if self._navi_guidance_texture is not None:
             rl.unload_texture(self._navi_guidance_texture)
             self._navi_guidance_texture = None
@@ -726,10 +795,19 @@ class ClusterUiRenderer:
             self._phone_media_art_texture = None
             self._phone_media_art_hash = ""
             self._phone_media_art_size = None
+        if self._ambient_reference_texture is not None:
+            rl.unload_texture(self._ambient_reference_texture)
+            self._ambient_reference_texture = None
+            self._ambient_reference_texture_path = ""
         if self._owns_font and self._font is not None:
             rl.unload_font(self._font)
         self._font = None
         self._owns_font = False
+        for name, font in self._ambient_fonts.items():
+            if name in self._owned_ambient_fonts:
+                rl.unload_font(font)
+        self._ambient_fonts.clear()
+        self._owned_ambient_fonts.clear()
         self._accel_text_width = 0.0
         if self._vehicle_model is not None:
             rl.unload_model(self._vehicle_model)
@@ -764,6 +842,13 @@ class ClusterUiRenderer:
         if signal_lights is None:
             signal_lights = self._turn_signal_lights(state)
         profile_stage = self._profile_start()
+        if self.screen_mode == CLUSTER_SCREEN_MODE_DEFAULT:
+            self._clear_ambient_dashboard()
+            self._profile_add("render.ambient_clear", profile_stage)
+            profile_stage = self._profile_start()
+            self._draw_ambient_dashboard(state)
+            self._profile_add("render.ambient_hud", profile_stage)
+            return
         if self.screen_mode == CLUSTER_SCREEN_MODE_DEBUG_GRAPH:
             self._clear_world()
         else:
@@ -1303,6 +1388,30 @@ class ClusterUiRenderer:
         self._owns_font = False
         return rl.get_font_default()
 
+    def _load_ambient_fonts(self) -> None:
+        self._ambient_fonts.clear()
+        self._owned_ambient_fonts.clear()
+        for name, path in (
+            ("light", INTER_LIGHT_FONT_PATH),
+            ("regular", INTER_REGULAR_FONT_PATH),
+            ("medium", INTER_MEDIUM_FONT_PATH),
+            ("semibold", INTER_SEMIBOLD_FONT_PATH),
+        ):
+            if not path.exists():
+                continue
+            try:
+                font = rl.load_font_ex(str(path), 220, None, 0)
+                if font.texture.id <= 0:
+                    continue
+                rl.set_texture_filter(font.texture, rl.TextureFilter.TEXTURE_FILTER_BILINEAR)
+                self._ambient_fonts[name] = font
+                self._owned_ambient_fonts.add(name)
+            except Exception as exc:
+                print(f"Ambient font load failed for {path}: {exc}")
+
+    def _ambient_font(self, weight: str):
+        return self._ambient_fonts.get(weight) or self._font or rl.get_font_default()
+
     def _font_candidates(self) -> list[Path]:
         return [
             KAIGEN_GOTHIC_KR_BOLD_FONT_PATH,
@@ -1373,6 +1482,12 @@ class ClusterUiRenderer:
         if self._lfa_active_texture is None:
             self._lfa_active_texture = self._load_lfa_active_texture()
 
+    def _load_ambient_icon_textures(self) -> None:
+        if self._ambient_cruise_icon_texture is None:
+            self._ambient_cruise_icon_texture = self._load_recolored_icon_texture(AMBIENT_CRUISE_ICON_PATH, WHITE, "Ambient cruise")
+        if self._ambient_lane_assist_icon_texture is None:
+            self._ambient_lane_assist_icon_texture = self._load_recolored_icon_texture(AMBIENT_LANE_ASSIST_ICON_PATH, (16, 185, 129), "Ambient lane assist")
+
     def _load_icon_texture(self, path: Path, label: str):
         if not path.exists():
             return None
@@ -1385,6 +1500,37 @@ class ClusterUiRenderer:
         except Exception as exc:
             print(f"{label} icon load failed: {exc}")
             return None
+
+    def _load_recolored_icon_texture(self, path: Path, color: tuple[int, int, int], label: str):
+        if not path.exists():
+            return None
+        image = None
+        try:
+            image = rl.load_image(str(path))
+            if not rl.is_image_valid(image):
+                return None
+            if image.format != rl.PixelFormat.PIXELFORMAT_UNCOMPRESSED_R8G8B8A8:
+                rl.image_format(image, rl.PixelFormat.PIXELFORMAT_UNCOMPRESSED_R8G8B8A8)
+            data = rl.ffi.cast("unsigned char *", image.data)
+            byte_count = image.width * image.height * 4
+            r, g, b = color
+            for offset in range(0, byte_count, 4):
+                if int(data[offset + 3]) == 0:
+                    continue
+                data[offset] = r
+                data[offset + 1] = g
+                data[offset + 2] = b
+            texture = rl.load_texture_from_image(image)
+            if texture.id <= 0:
+                return None
+            rl.set_texture_filter(texture, rl.TextureFilter.TEXTURE_FILTER_BILINEAR)
+            return texture
+        except Exception as exc:
+            print(f"{label} icon recolor failed: {exc}")
+            return None
+        finally:
+            if image is not None and rl.is_image_valid(image):
+                rl.unload_image(image)
 
     def _load_lfa_active_texture(self):
         if not LFA_ICON_PATH.exists():
@@ -2143,6 +2289,301 @@ class ClusterUiRenderer:
         finally:
             rl.rl_enable_backface_culling()
 
+    def _clear_ambient_dashboard(self) -> None:
+        rl.clear_background(rl_color(AMBIENT_BODY_BG))
+
+    def _draw_ambient_dashboard(self, state: ClusterUiState) -> None:
+        sx = self.width / DESIGN_WIDTH
+        sy = self.height / DESIGN_HEIGHT
+        rl.rl_push_matrix()
+        rl.rl_scalef(sx, sy, 1.0)
+        try:
+            if self._draw_ambient_reference_image():
+                return
+            self._draw_ambient_background()
+            self._draw_ambient_bsm_edges(state)
+            self._draw_ambient_power_meter(state)
+            self._draw_ambient_speed(state)
+            self._draw_ambient_drive_status(state)
+            self._draw_ambient_clock(state)
+            self._draw_phone_media_panel(state.phone_media, ambient=True)
+        finally:
+            rl.rl_pop_matrix()
+
+    def _draw_ambient_reference_image(self) -> bool:
+        texture = self._ambient_reference_texture_for_env()
+        if texture is None or texture.width <= 0 or texture.height <= 0:
+            return False
+        source = rl.Rectangle(0.0, 0.0, float(texture.width), float(texture.height))
+        dest = rl.Rectangle(0.0, 0.0, float(DESIGN_WIDTH), float(DESIGN_HEIGHT))
+        rl.draw_texture_pro(texture, source, dest, rl.Vector2(0.0, 0.0), 0.0, rl_color(WHITE))
+        return True
+
+    def _ambient_reference_texture_for_env(self):
+        path = os.environ.get("CLUSTER_AMBIENT_REFERENCE_IMAGE", "").strip()
+        if not path:
+            if self._ambient_reference_texture is not None:
+                rl.unload_texture(self._ambient_reference_texture)
+                self._ambient_reference_texture = None
+                self._ambient_reference_texture_path = ""
+            return None
+        if self._ambient_reference_texture is not None and path == self._ambient_reference_texture_path:
+            return self._ambient_reference_texture
+        if self._ambient_reference_texture is not None:
+            rl.unload_texture(self._ambient_reference_texture)
+            self._ambient_reference_texture = None
+            self._ambient_reference_texture_path = ""
+        image_path = Path(path)
+        if not image_path.exists():
+            return None
+        texture = self._load_icon_texture(image_path, "Ambient reference")
+        if texture is None:
+            return None
+        self._ambient_reference_texture = texture
+        self._ambient_reference_texture_path = path
+        return texture
+
+    def _draw_ambient_background(self) -> None:
+        radius = math.hypot(DESIGN_WIDTH * 0.5, DESIGN_HEIGHT * 0.5)
+        rl.draw_circle_gradient(
+            int(DESIGN_WIDTH * 0.5),
+            int(DESIGN_HEIGHT * 0.5),
+            radius,
+            rl_color(AMBIENT_BG_CENTER),
+            rl_color(AMBIENT_BG_EDGE),
+        )
+        rect = rl.Rectangle(0.0, 0.0, float(DESIGN_WIDTH), float(DESIGN_HEIGHT))
+        rl.draw_rectangle_rounded_lines_ex(rect, 16.0 / DESIGN_HEIGHT, 24, 1.0, rl_color(AMBIENT_BORDER))
+
+    def _draw_ambient_bsm_edges(self, state: ClusterUiState) -> None:
+        left_active, right_active = ambient_bsm_edges(state.left_blindspot, state.right_blindspot)
+        if left_active:
+            self._draw_ambient_bsm_edge("left")
+        if right_active:
+            self._draw_ambient_bsm_edge("right")
+
+    def _draw_ambient_bsm_edge(self, side: str) -> None:
+        for index, alpha in enumerate((130, 80, 42, 20)):
+            width = AMBIENT_BSM_W - index * 24.0
+            if width <= 0.0:
+                continue
+            x = 0.0 if side == "left" else DESIGN_WIDTH - width
+            rl.draw_rectangle(int(x), 0, int(width), DESIGN_HEIGHT, rl_color(AMBIENT_BSM_COLOR, alpha))
+
+        rail_w = 16.0
+        rail_h = 232.0
+        rail_y = (DESIGN_HEIGHT - rail_h) * 0.5
+        rail_x = 26.0 if side == "left" else DESIGN_WIDTH - 26.0 - rail_w
+        self._rounded_rect(rail_x, rail_y, rail_w, rail_h, 8.0, (*AMBIENT_BSM_COLOR, 190), None, 0.0)
+
+    def _draw_ambient_power_meter(self, state: ClusterUiState) -> None:
+        direction, amount = ambient_power_gauge(state.accel_mps2)
+        track_x = AMBIENT_POWER_TRACK_X
+        track_y = AMBIENT_POWER_TRACK_Y
+        track_w = AMBIENT_POWER_TRACK_W
+        track_h = AMBIENT_POWER_TRACK_H
+        mid_y = AMBIENT_POWER_FILL_Y + AMBIENT_POWER_FILL_H * 0.5 + AMBIENT_POWER_HANDLE_H * 0.5
+        top_h = AMBIENT_POWER_FILL_H * 0.5
+        bottom_h = AMBIENT_POWER_FILL_H * 0.5
+
+        self._draw_ambient_text("+", AMBIENT_POWER_CENTER_X, 85.0, 32.0, (96, 165, 250), weight="regular", anchor="center")
+        self._draw_ambient_text("-", AMBIENT_POWER_CENTER_X, 394.0, 32.0, (248, 113, 113), weight="regular", anchor="center")
+        self._rounded_rect(track_x, track_y, track_w, track_h, 22.0, (0, 0, 0, 0), (255, 255, 255, 26), 2.0)
+        self._draw_power_gradient()
+
+        if amount > 0.0:
+            if direction == "power":
+                active_h = max(0.0, top_h * amount)
+                handle_y = mid_y - active_h
+            elif direction == "brake":
+                active_h = max(0.0, bottom_h * amount)
+                handle_y = mid_y + active_h
+            else:
+                handle_y = mid_y
+        else:
+            handle_y = mid_y
+
+        handle_y = clamp(handle_y, track_y + 8.0, track_y + track_h - 8.0)
+        self._rounded_rect(
+            AMBIENT_POWER_CENTER_X - AMBIENT_POWER_HANDLE_W * 0.5,
+            handle_y - AMBIENT_POWER_HANDLE_H * 0.5,
+            AMBIENT_POWER_HANDLE_W,
+            AMBIENT_POWER_HANDLE_H,
+            3.0,
+            WHITE,
+            None,
+            0.0,
+        )
+
+    def _draw_power_gradient(self) -> None:
+        fill_x = AMBIENT_POWER_FILL_X
+        fill_y = AMBIENT_POWER_FILL_Y
+        fill_w = AMBIENT_POWER_FILL_W
+        fill_h = AMBIENT_POWER_FILL_H
+        half_h = fill_h * 0.5
+        rl.draw_rectangle_gradient_v(
+            int(fill_x),
+            int(fill_y),
+            int(fill_w),
+            int(math.ceil(half_h)),
+            rl_color((0, 122, 255)),
+            rl_color((125, 176, 227)),
+        )
+        rl.draw_rectangle_gradient_v(
+            int(fill_x),
+            int(fill_y + half_h),
+            int(fill_w),
+            int(math.ceil(half_h)),
+            rl_color((227, 130, 130)),
+            rl_color((255, 59, 48)),
+        )
+        rl.draw_circle_v(rl.Vector2(fill_x + fill_w * 0.5, fill_y), fill_w * 0.5, rl_color((0, 122, 255)))
+        rl.draw_circle_v(rl.Vector2(fill_x + fill_w * 0.5, fill_y + fill_h), fill_w * 0.5, rl_color((255, 59, 48)))
+
+    def _draw_ambient_speed(self, state: ClusterUiState) -> None:
+        display_speed_kph = state.display_speed_kph if state.display_speed_kph is not None else state.speed_kph
+        speed_value = int(round(clamp(display_speed_kph, 0.0, MAX_SPEED_KPH)))
+        self._draw_ambient_text_with_stroke(
+            str(speed_value),
+            AMBIENT_SPEED_CENTER_X,
+            AMBIENT_SPEED_CENTER_Y,
+            AMBIENT_SPEED_SIZE,
+            WHITE,
+            BLACK,
+            0,
+            weight="medium",
+            anchor="center",
+        )
+        self._draw_ambient_text("km/h", AMBIENT_SPEED_UNIT_X, AMBIENT_SPEED_UNIT_Y, AMBIENT_SPEED_UNIT_SIZE, (107, 114, 128), weight="regular", anchor="center")
+
+    def _draw_ambient_drive_status(self, state: ClusterUiState) -> None:
+        gear_text = (state.gear_text or "-").strip().upper()[:2] or "-"
+        self._draw_ambient_text(
+            gear_text,
+            AMBIENT_GEAR_X,
+            AMBIENT_TOP_ROW_Y,
+            AMBIENT_GEAR_SIZE,
+            WHITE,
+            weight="medium",
+            anchor="center",
+        )
+        self._draw_ambient_divider(810.0)
+        self._draw_ambient_cruise_set(state)
+        self._draw_ambient_divider(1076.0)
+        self._draw_ambient_lfa_icon(state)
+        self._draw_ambient_gap_bars(state)
+
+    def _draw_ambient_divider(self, x: float) -> None:
+        y0 = AMBIENT_TOP_ROW_Y - AMBIENT_DIVIDER_H * 0.5
+        rl.draw_line_ex(
+            rl.Vector2(x, y0),
+            rl.Vector2(x, y0 + AMBIENT_DIVIDER_H),
+            2.0,
+            rl_color((255, 255, 255), 48),
+        )
+
+    def _draw_ambient_cruise_set(self, state: ClusterUiState) -> None:
+        speed_text = self._cruise_set_speed_text(state)
+        speed_color = WHITE if self._cruise_set_visible(state) else (156, 163, 175)
+        icon_color = WHITE if self._cruise_set_visible(state) else (156, 163, 175)
+        self._draw_ambient_cruise_icon(AMBIENT_CRUISE_ICON_X, AMBIENT_TOP_ROW_Y, icon_color)
+
+        self._draw_ambient_text(speed_text, AMBIENT_CRUISE_SPEED_X, AMBIENT_TOP_ROW_Y, AMBIENT_CRUISE_SPEED_SIZE, speed_color, weight="regular")
+        self._draw_ambient_text("km/h", AMBIENT_CRUISE_UNIT_X, AMBIENT_TOP_ROW_Y + 1.0, AMBIENT_CRUISE_UNIT_SIZE, (156, 163, 175), weight="regular")
+
+    def _draw_ambient_cruise_icon(self, center_x: float, center_y: float, color: tuple[int, int, int]) -> None:
+        if self._ambient_cruise_icon_texture is not None and self._ambient_cruise_icon_texture.width > 0:
+            source = rl.Rectangle(0.0, 0.0, float(self._ambient_cruise_icon_texture.width), float(self._ambient_cruise_icon_texture.height))
+            dest = rl.Rectangle(center_x - 26.0, center_y - 25.0, 52.0, 50.0)
+            rl.draw_texture_pro(self._ambient_cruise_icon_texture, source, dest, rl.Vector2(0.0, 0.0), 0.0, rl_color(color, 235))
+            return
+        arc_points = (
+            rl.Vector2(center_x - 26.0, center_y + 10.0),
+            rl.Vector2(center_x - 18.0, center_y - 10.0),
+            rl.Vector2(center_x, center_y - 20.0),
+            rl.Vector2(center_x + 18.0, center_y - 10.0),
+            rl.Vector2(center_x + 26.0, center_y + 10.0),
+        )
+        for index in range(len(arc_points) - 1):
+            rl.draw_line_ex(arc_points[index], arc_points[index + 1], 4.0, rl_color(color, 220))
+        rl.draw_line_ex(
+            rl.Vector2(center_x, center_y + 8.0),
+            rl.Vector2(center_x + 15.0, center_y - 7.0),
+            4.0,
+            rl_color(color, 230),
+        )
+        rl.draw_circle_v(rl.Vector2(center_x, center_y + 8.0), 4.0, rl_color(color, 230))
+
+    def _draw_ambient_lfa_icon(self, state: ClusterUiState) -> None:
+        active = bool(state.lfa_active)
+        if self._ambient_lane_assist_icon_texture is not None and self._ambient_lane_assist_icon_texture.width > 0:
+            source = rl.Rectangle(0.0, 0.0, float(self._ambient_lane_assist_icon_texture.width), float(self._ambient_lane_assist_icon_texture.height))
+            dest = rl.Rectangle(AMBIENT_LFA_CENTER_X - 36.0, AMBIENT_TOP_ROW_Y - 23.0, 72.0, 46.0)
+            alpha = 242 if active else 185
+            rl.draw_texture_pro(self._ambient_lane_assist_icon_texture, source, dest, rl.Vector2(0.0, 0.0), 0.0, rl_color(WHITE, alpha))
+            return
+        texture = self._lfa_active_texture if active and self._lfa_active_texture is not None else self._lfa_texture
+        tint = (16, 185, 129) if active else (126, 135, 148)
+        if texture is not None and texture.width > 0 and texture.height > 0:
+            icon_w = 72.0
+            icon_h = 46.0
+            source = rl.Rectangle(0.0, 0.0, float(texture.width), float(texture.height))
+            dest = rl.Rectangle(
+                AMBIENT_LFA_CENTER_X - icon_w * 0.5,
+                AMBIENT_TOP_ROW_Y - icon_h * 0.5,
+                icon_w,
+                icon_h,
+            )
+            rl.draw_texture_pro(texture, source, dest, rl.Vector2(0.0, 0.0), 0.0, rl_color(tint, 255 if active else 185))
+            self._draw_ambient_lfa_wheel(tint)
+            return
+
+        left_x = AMBIENT_LFA_CENTER_X - 34.0
+        right_x = AMBIENT_LFA_CENTER_X + 34.0
+        y0 = AMBIENT_TOP_ROW_Y + 24.0
+        y1 = AMBIENT_TOP_ROW_Y - 24.0
+        rl.draw_line_ex(rl.Vector2(left_x, y0), rl.Vector2(left_x + 12.0, y1), 4.0, rl_color(tint, 220))
+        rl.draw_line_ex(rl.Vector2(right_x, y0), rl.Vector2(right_x - 12.0, y1), 4.0, rl_color(tint, 220))
+        self._draw_ambient_lfa_wheel(tint)
+
+    def _draw_ambient_lfa_wheel(self, color: tuple[int, int, int]) -> None:
+        rl.draw_circle_lines(int(AMBIENT_LFA_CENTER_X), int(AMBIENT_TOP_ROW_Y), 17.0, rl_color(color, 220))
+        rl.draw_circle_lines(int(AMBIENT_LFA_CENTER_X), int(AMBIENT_TOP_ROW_Y + 1.0), 8.0, rl_color(color, 220))
+        rl.draw_line_ex(
+            rl.Vector2(AMBIENT_LFA_CENTER_X - 10.0, AMBIENT_TOP_ROW_Y + 7.0),
+            rl.Vector2(AMBIENT_LFA_CENTER_X + 10.0, AMBIENT_TOP_ROW_Y + 7.0),
+            3.0,
+            rl_color(color, 220),
+        )
+        rl.draw_line_ex(
+            rl.Vector2(AMBIENT_LFA_CENTER_X, AMBIENT_TOP_ROW_Y + 7.0),
+            rl.Vector2(AMBIENT_LFA_CENTER_X, AMBIENT_TOP_ROW_Y + 17.0),
+            3.0,
+            rl_color(color, 220),
+        )
+
+    def _draw_ambient_gap_bars(self, state: ClusterUiState) -> None:
+        gap_count = 0 if state.cruise_gap is None else int(clamp(float(state.cruise_gap), 1.0, float(FOLLOW_STATUS_GAP_BARS)))
+        start_x = AMBIENT_GAP_X
+        for index in range(FOLLOW_STATUS_GAP_BARS):
+            active = index < gap_count
+            x = start_x + index * (AMBIENT_GAP_BAR_W + AMBIENT_GAP_BAR_GAP)
+            self._rounded_rect(
+                x,
+                AMBIENT_GAP_Y,
+                AMBIENT_GAP_BAR_W,
+                AMBIENT_GAP_BAR_H,
+                2.0,
+                (16, 185, 129) if active else (0, 0, 0, 0),
+                (16, 185, 129) if active else (255, 255, 255, 51),
+                1.0,
+            )
+
+    def _draw_ambient_clock(self, state: ClusterUiState) -> None:
+        raw_text = (state.center_clock_text or time.strftime("%H:%M")).strip()
+        text = raw_text[:5] if len(raw_text) >= 5 and raw_text[2] == ":" else raw_text
+        self._draw_ambient_text(text, AMBIENT_CLOCK_RIGHT_X, AMBIENT_CLOCK_Y, AMBIENT_CLOCK_SIZE, (229, 231, 235), weight="light", anchor="right")
+
     def _draw_hud(self, state: ClusterUiState, signal_lights: tuple[bool, bool] | None = None) -> None:
         if signal_lights is None:
             signal_lights = self._turn_signal_lights(state)
@@ -2272,7 +2713,7 @@ class ClusterUiRenderer:
         rl.draw_rectangle_rounded_lines_ex(rect, 0.28, 12, 2.0, rl_color(theme.clock_outline))
         self._draw_text(text, x, y, size, theme.clock_text, anchor="center")
 
-    def _draw_phone_media_panel(self, media: PhoneMediaInfo | None) -> bool:
+    def _draw_phone_media_panel(self, media: PhoneMediaInfo | None, ambient: bool = False) -> bool:
         if media is None or not (media.title or media.artist or media.art_base64):
             if self._phone_media_art_texture is not None:
                 rl.unload_texture(self._phone_media_art_texture)
@@ -2281,35 +2722,63 @@ class ClusterUiRenderer:
                 self._phone_media_art_size = None
             return False
 
-        theme = self._current_theme()
+        theme = current_cluster_theme("dark") if ambient else self._current_theme()
         text_w = PHONE_MEDIA_W - PHONE_MEDIA_ART_SIZE - 24.0
-        title = self._ellipsize_text(media.title or "Now playing", PHONE_MEDIA_TITLE_SIZE, text_w)
-        artist = self._ellipsize_text(media.artist or "", PHONE_MEDIA_ARTIST_SIZE, text_w)
+        if ambient:
+            title = self._ellipsize_ambient_text(media.title or "Now playing", PHONE_MEDIA_TITLE_SIZE, text_w, "semibold")
+            artist = self._ellipsize_ambient_text(media.artist or "", PHONE_MEDIA_ARTIST_SIZE, text_w, "regular")
+        else:
+            title = self._ellipsize_text(media.title or "Now playing", PHONE_MEDIA_TITLE_SIZE, text_w)
+            artist = self._ellipsize_text(media.artist or "", PHONE_MEDIA_ARTIST_SIZE, text_w)
         texture = self._phone_media_art_texture_for(media)
 
         if texture is not None and texture.width > 0 and texture.height > 0:
             source = rl.Rectangle(0.0, 0.0, float(texture.width), float(texture.height))
-            dest = rl.Rectangle(PHONE_MEDIA_X, PHONE_MEDIA_Y, PHONE_MEDIA_ART_SIZE, PHONE_MEDIA_ART_SIZE)
+            if ambient:
+                dest = rl.Rectangle(PHONE_MEDIA_X + 1.0, PHONE_MEDIA_Y + 1.0, PHONE_MEDIA_ART_CONTENT_SIZE, PHONE_MEDIA_ART_CONTENT_SIZE)
+                border_dest = rl.Rectangle(PHONE_MEDIA_X, PHONE_MEDIA_Y, PHONE_MEDIA_ART_SIZE, PHONE_MEDIA_ART_SIZE)
+            else:
+                dest = rl.Rectangle(PHONE_MEDIA_X, PHONE_MEDIA_Y, PHONE_MEDIA_ART_SIZE, PHONE_MEDIA_ART_SIZE)
+                border_dest = dest
             rl.draw_texture_pro(texture, source, dest, rl.Vector2(0.0, 0.0), 0.0, rl_color(WHITE))
-            rl.draw_rectangle_rounded_lines_ex(dest, 0.12, 10, 2.0, rl_color(theme.faint, 110))
+            rl.draw_rectangle_rounded_lines_ex(border_dest, 12.0 / PHONE_MEDIA_ART_SIZE, 10, 1.0, rl_color((255, 255, 255), 13 if ambient else 110))
         else:
             self._rounded_rect(PHONE_MEDIA_X, PHONE_MEDIA_Y, PHONE_MEDIA_ART_SIZE, PHONE_MEDIA_ART_SIZE, 18.0, theme.panel_bg, theme.faint, 2.0)
 
-        self._draw_text(title, PHONE_MEDIA_TEXT_X, PHONE_MEDIA_TITLE_Y, PHONE_MEDIA_TITLE_SIZE, theme.text)
+        if ambient:
+            self._draw_ambient_text(title, PHONE_MEDIA_TEXT_X, PHONE_MEDIA_TITLE_Y, PHONE_MEDIA_TITLE_SIZE, WHITE, weight="semibold")
+        else:
+            self._draw_text(title, PHONE_MEDIA_TEXT_X, PHONE_MEDIA_TITLE_Y, PHONE_MEDIA_TITLE_SIZE, theme.text)
         if artist:
-            self._draw_text(artist, PHONE_MEDIA_TEXT_X, PHONE_MEDIA_ARTIST_Y, PHONE_MEDIA_ARTIST_SIZE, theme.muted)
+            if ambient:
+                self._draw_ambient_text(artist, PHONE_MEDIA_TEXT_X, PHONE_MEDIA_ARTIST_Y, PHONE_MEDIA_ARTIST_SIZE, (209, 213, 219), weight="regular")
+            else:
+                self._draw_text(artist, PHONE_MEDIA_TEXT_X, PHONE_MEDIA_ARTIST_Y, PHONE_MEDIA_ARTIST_SIZE, theme.muted)
         elif not media.is_playing:
-            self._draw_text("Paused", PHONE_MEDIA_TEXT_X, PHONE_MEDIA_ARTIST_Y, PHONE_MEDIA_ARTIST_SIZE, theme.muted)
+            if ambient:
+                self._draw_ambient_text("Paused", PHONE_MEDIA_TEXT_X, PHONE_MEDIA_ARTIST_Y, PHONE_MEDIA_ARTIST_SIZE, (209, 213, 219), weight="regular")
+            else:
+                self._draw_text("Paused", PHONE_MEDIA_TEXT_X, PHONE_MEDIA_ARTIST_Y, PHONE_MEDIA_ARTIST_SIZE, theme.muted)
 
         if media.duration_ms is not None and media.duration_ms > 0 and media.position_ms is not None:
             progress = clamp(media.position_ms / max(1.0, float(media.duration_ms)), 0.0, 1.0)
             bg_rect = rl.Rectangle(PHONE_MEDIA_X, PHONE_MEDIA_PROGRESS_Y, PHONE_MEDIA_W, PHONE_MEDIA_PROGRESS_H)
             fg_rect = rl.Rectangle(PHONE_MEDIA_X, PHONE_MEDIA_PROGRESS_Y, PHONE_MEDIA_W * progress, PHONE_MEDIA_PROGRESS_H)
-            rl.draw_rectangle_rounded(bg_rect, 0.5, 8, rl_color(theme.faint, 120))
-            rl.draw_rectangle_rounded(fg_rect, 0.5, 8, rl_color(BLUE))
-            time_y = PHONE_MEDIA_PROGRESS_Y + 22.0
-            self._draw_text(format_duration_ms(media.position_ms), PHONE_MEDIA_X, time_y, PHONE_MEDIA_TIME_SIZE, theme.muted)
-            self._draw_text(format_duration_ms(media.duration_ms), PHONE_MEDIA_X + PHONE_MEDIA_W, time_y, PHONE_MEDIA_TIME_SIZE, theme.muted, anchor="right")
+            bg_color = (255, 255, 255, 26) if ambient else (*theme.faint, 120)
+            fg_color = (59, 130, 246) if ambient else BLUE
+            rl.draw_rectangle_rounded(bg_rect, 0.5, 8, rl_color(bg_color))
+            rl.draw_rectangle_rounded(fg_rect, 0.5, 8, rl_color(fg_color))
+            if ambient:
+                thumb_x = PHONE_MEDIA_X + PHONE_MEDIA_W * progress
+                thumb_y = PHONE_MEDIA_PROGRESS_Y + PHONE_MEDIA_PROGRESS_H * 0.5
+                rl.draw_circle_v(rl.Vector2(thumb_x, thumb_y), 7.0, rl_color(WHITE))
+                time_y = PHONE_MEDIA_PROGRESS_Y + 25.5
+                self._draw_ambient_text(format_duration_ms(media.position_ms), PHONE_MEDIA_X, time_y, PHONE_MEDIA_TIME_SIZE, (156, 163, 175), weight="regular")
+                self._draw_ambient_text(format_duration_ms(media.duration_ms), PHONE_MEDIA_X + PHONE_MEDIA_W, time_y, PHONE_MEDIA_TIME_SIZE, (156, 163, 175), weight="regular", anchor="right")
+            else:
+                time_y = PHONE_MEDIA_PROGRESS_Y + 22.0
+                self._draw_text(format_duration_ms(media.position_ms), PHONE_MEDIA_X, time_y, PHONE_MEDIA_TIME_SIZE, theme.muted)
+                self._draw_text(format_duration_ms(media.duration_ms), PHONE_MEDIA_X + PHONE_MEDIA_W, time_y, PHONE_MEDIA_TIME_SIZE, theme.muted, anchor="right")
         return True
 
     def _phone_media_art_texture_for(self, media: PhoneMediaInfo | None):
@@ -2343,6 +2812,9 @@ class ClusterUiRenderer:
             loaded_image = rl.load_image_from_memory(extension, image_bytes, len(image_bytes))
             if not rl.is_image_valid(loaded_image):
                 return None
+            if loaded_image.width != int(PHONE_MEDIA_ART_CONTENT_SIZE) or loaded_image.height != int(PHONE_MEDIA_ART_CONTENT_SIZE):
+                rl.image_resize(loaded_image, int(PHONE_MEDIA_ART_CONTENT_SIZE), int(PHONE_MEDIA_ART_CONTENT_SIZE))
+            self._apply_rounded_image_alpha(loaded_image, int(12))
             texture = rl.load_texture_from_image(loaded_image)
             if not rl.is_texture_valid(texture):
                 rl.unload_texture(texture)
@@ -2357,6 +2829,34 @@ class ClusterUiRenderer:
         finally:
             if loaded_image is not None and rl.is_image_valid(loaded_image):
                 rl.unload_image(loaded_image)
+
+    @staticmethod
+    def _apply_rounded_image_alpha(image, radius_px: int) -> None:
+        if radius_px <= 0 or image.width <= 0 or image.height <= 0:
+            return
+        if image.format != rl.PixelFormat.PIXELFORMAT_UNCOMPRESSED_R8G8B8A8:
+            rl.image_format(image, rl.PixelFormat.PIXELFORMAT_UNCOMPRESSED_R8G8B8A8)
+        width = int(image.width)
+        height = int(image.height)
+        radius = float(min(radius_px, width // 2, height // 2))
+        if radius <= 0.0:
+            return
+        data = rl.ffi.cast("unsigned char *", image.data)
+        corner_centers = (
+            (radius - 0.5, radius - 0.5, 0, 0),
+            (width - radius - 0.5, radius - 0.5, width - radius, 0),
+            (radius - 0.5, height - radius - 0.5, 0, height - radius),
+            (width - radius - 0.5, height - radius - 0.5, width - radius, height - radius),
+        )
+        radius_sq = radius * radius
+        for center_x, center_y, start_x, start_y in corner_centers:
+            for y in range(int(start_y), int(start_y + radius)):
+                for x in range(int(start_x), int(start_x + radius)):
+                    dx = float(x) - center_x
+                    dy = float(y) - center_y
+                    if dx * dx + dy * dy <= radius_sq:
+                        continue
+                    data[(y * width + x) * 4 + 3] = 0
 
     def _draw_debug_plot(
         self,
@@ -3338,12 +3838,16 @@ class ClusterUiRenderer:
         tint = WHITE if active else theme.muted
         alpha = 255 if active else 190
         rotation_deg = -float(state.steering_angle_deg or 0.0)
+        icon_w = LFA_STATUS_ICON_SIZE
+        icon_h = LFA_STATUS_ICON_SIZE
+        if texture is not None and texture.width > 0 and texture.height > 0:
+            icon_w = icon_h * (float(texture.width) / max(1.0, float(texture.height)))
         if self._draw_bottom_aligned_texture_icon(
             texture,
             LFA_STATUS_CENTER_X,
             bottom_y,
-            LFA_STATUS_ICON_SIZE,
-            LFA_STATUS_ICON_SIZE,
+            icon_w,
+            icon_h,
             tint,
             alpha,
             rotation_deg,
@@ -3568,6 +4072,38 @@ class ClusterUiRenderer:
         if outline is not None and outline_width > 0:
             rl.draw_rectangle_rounded_lines_ex(rect, roundness, 12, outline_width, rl_color(outline))
 
+    def _rounded_rect_glow(
+        self,
+        x: float,
+        y: float,
+        width: float,
+        height: float,
+        radius: float,
+        color: tuple[int, int, int],
+        alpha: int,
+        spread: float,
+        steps: int = 5,
+    ) -> None:
+        for index in range(steps, 0, -1):
+            amount = spread * float(index) / float(steps)
+            step_alpha = int(alpha * (index / steps) ** 2)
+            self._rounded_rect(
+                x - amount,
+                y - amount,
+                width + amount * 2.0,
+                height + amount * 2.0,
+                radius + amount,
+                (*color, step_alpha),
+                None,
+                0.0,
+            )
+
+    def _circle_glow(self, x: float, y: float, radius: float, color: tuple[int, int, int], alpha: int, spread: float, steps: int = 6) -> None:
+        for index in range(steps, 0, -1):
+            amount = spread * float(index) / float(steps)
+            step_alpha = int(alpha * (index / steps) ** 2)
+            rl.draw_circle_v(rl.Vector2(x, y), radius + amount, rl_color((*color, step_alpha)))
+
     def _draw_text(
         self,
         text: str,
@@ -3615,6 +4151,57 @@ class ClusterUiRenderer:
             ):
                 self._draw_text(text, x + dx, y + dy, size, stroke_color, anchor)
         self._draw_text(text, x, y, size, color, anchor)
+
+    def _draw_ambient_text(
+        self,
+        text: str,
+        x: float,
+        y: float,
+        size: float,
+        color: tuple[int, int, int],
+        weight: str = "regular",
+        anchor: str = "left",
+        spacing: float = 0.0,
+    ) -> None:
+        font = self._ambient_font(weight)
+        text_width, text_height = self._measure_text_with_font(font, text, size, spacing)
+        draw_x = x
+        draw_y = y
+        if anchor == "center":
+            draw_x = x - text_width * 0.5
+            draw_y = y - text_height * 0.5
+        elif anchor == "left":
+            draw_y = y - text_height * 0.5
+        elif anchor == "right":
+            draw_x = x - text_width
+            draw_y = y - text_height * 0.5
+        rl.draw_text_ex(font, text, rl.Vector2(draw_x, draw_y), size, spacing, rl_color(color))
+        r, g, b, a = rgba_key(color)
+        if a > 0 and AMBIENT_TEXT_EDGE_BOOST_ALPHA > 0:
+            boost_alpha = int(min(AMBIENT_TEXT_EDGE_BOOST_ALPHA, a * 0.32))
+            rl.draw_text_ex(font, text, rl.Vector2(draw_x, draw_y), size, spacing, rl_color((r, g, b, boost_alpha)))
+
+    def _draw_ambient_text_with_stroke(
+        self,
+        text: str,
+        x: float,
+        y: float,
+        size: float,
+        color: tuple[int, int, int],
+        stroke_color: tuple[int, int, int],
+        stroke_width: int,
+        weight: str = "regular",
+        anchor: str = "left",
+    ) -> None:
+        if stroke_width > 0:
+            for dx, dy in (
+                (-stroke_width, 0),
+                (stroke_width, 0),
+                (0, -stroke_width),
+                (0, stroke_width),
+            ):
+                self._draw_ambient_text(text, x + dx, y + dy, size, stroke_color, weight, anchor)
+        self._draw_ambient_text(text, x, y, size, color, weight, anchor)
 
     def _draw_world_label_text(
         self,
@@ -3740,13 +4327,16 @@ class ClusterUiRenderer:
         if self._font is None:
             self._font = rl.get_font_default()
         measure_spacing = max(1.0, size * 0.02) if spacing is None else spacing
-        key = (id(self._font), text, float(size), float(measure_spacing))
+        return self._measure_text_with_font(self._font, text, size, measure_spacing)
+
+    def _measure_text_with_font(self, font, text: str, size: float, spacing: float) -> tuple[float, float]:
+        if len(self._text_measure_cache) >= TEXT_MEASURE_CACHE_LIMIT:
+            self._text_measure_cache.clear()
+        key = (id(font), text, float(size), float(spacing))
         measured = self._text_measure_cache.get(key)
         if measured is not None:
             return measured
-        if len(self._text_measure_cache) >= TEXT_MEASURE_CACHE_LIMIT:
-            self._text_measure_cache.clear()
-        text_size = rl.measure_text_ex(self._font, text, size, measure_spacing)
+        text_size = rl.measure_text_ex(font, text, size, spacing)
         measured = (float(text_size.x), float(text_size.y))
         self._text_measure_cache[key] = measured
         return measured
@@ -3762,6 +4352,23 @@ class ClusterUiRenderer:
             mid = (low + high + 1) // 2
             candidate = text[:mid] + ellipsis
             if self._measure_text(candidate, size, spacing)[0] <= max_width:
+                low = mid
+            else:
+                high = mid - 1
+        return text[:low] + ellipsis
+
+    def _ellipsize_ambient_text(self, text: str, size: float, max_width: float, weight: str) -> str:
+        font = self._ambient_font(weight)
+        spacing = 0.0
+        if self._measure_text_with_font(font, text, size, spacing)[0] <= max_width:
+            return text
+        ellipsis = "..."
+        low = 0
+        high = len(text)
+        while low < high:
+            mid = (low + high + 1) // 2
+            candidate = text[:mid] + ellipsis
+            if self._measure_text_with_font(font, candidate, size, spacing)[0] <= max_width:
                 low = mid
             else:
                 high = mid - 1
