@@ -9,6 +9,7 @@ import base64
 import math
 import os
 import time
+import traceback
 from pathlib import Path
 
 import pyray as rl
@@ -84,6 +85,17 @@ EGO_VEHICLE_TEXTURE_PATH = SELFDRIVE_DIR / "assets" / "icons_mici" / "ego_vehicl
 LFA_ICON_PATH = SELFDRIVE_DIR / "assets" / "icons_mici" / "carrot_wheel_lane.png"
 AMBIENT_CRUISE_ICON_PATH = CLUSTER_DIR / "assets" / "ambient" / "cruise-set-icon.png"
 AMBIENT_LANE_ASSIST_ICON_PATH = CLUSTER_DIR / "assets" / "ambient" / "lane-assist-icon.png"
+AMBIENT_DIAG_LOG_PATHS = tuple(
+    Path(path)
+    for path in (
+        os.environ.get("CLUSTER_AMBIENT_DIAG_LOG", "").strip(),
+        "/data/media/0/cluster_ambient_diag.log",
+        "/data/media/cluster_ambient_diag.log",
+        "/tmp/cluster_ambient_diag.log",
+    )
+    if path
+)
+AMBIENT_DIAG_LOG_MAX_BYTES = 64 * 1024
 ACCEL_TEXT_WIDTH_SAMPLES = ("+00.00", "-00.00")
 BLACK = (0, 0, 0)
 TURN_SIGNAL_LEFT_CENTER_X = 610
@@ -698,6 +710,26 @@ class ClusterUiRenderer:
         if self.profile_enabled:
             self._profile_samples.append((name, elapsed_ms))
 
+    def _append_ambient_diag(self, event: str, exc: Exception | None = None) -> None:
+        lines = [
+            f"[{kst_clock_text(include_seconds=True)} KST] {event}",
+            f"screen_mode={self.screen_mode} theme_mode={self.theme_mode} size={self.width}x{self.height} target_fps={self.target_fps}",
+        ]
+        if exc is not None:
+            lines.append(f"{type(exc).__name__}: {exc}")
+            tb = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__, limit=8)).strip()
+            if tb:
+                lines.append(tb)
+        payload = ("\n".join(lines).rstrip() + "\n\n").encode("utf-8", "replace")
+        for path in AMBIENT_DIAG_LOG_PATHS:
+            try:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                previous = path.read_bytes() if path.exists() else b""
+                path.write_bytes((previous + payload)[-AMBIENT_DIAG_LOG_MAX_BYTES:])
+                return
+            except Exception:
+                continue
+
     def open(self, hidden: bool = False) -> None:
         if self._window_open:
             return
@@ -737,6 +769,13 @@ class ClusterUiRenderer:
         profile_stage = self._profile_start()
         self._load_ambient_icon_textures()
         self._profile_add("renderer.open.load_ambient_icon_textures", profile_stage)
+        self._append_ambient_diag(
+            "ambient renderer opened "
+            f"draw_circle_gradient={hasattr(rl, 'draw_circle_gradient')} "
+            f"draw_rectangle_gradient_v={hasattr(rl, 'draw_rectangle_gradient_v')} "
+            f"is_image_valid={hasattr(rl, 'is_image_valid')} "
+            f"is_texture_valid={hasattr(rl, 'is_texture_valid')}"
+        )
         self._window_open = True
         self._profile_add("renderer.open.total", profile_total)
 
@@ -828,16 +867,20 @@ class ClusterUiRenderer:
         return bool(self._window_open and rl.window_should_close())
 
     def render_frame(self, state: ClusterUiState) -> None:
-        self.open()
-        profile_stage = self._profile_start()
-        rl.begin_drawing()
-        self._profile_add("render_frame.begin_drawing", profile_stage)
-        profile_stage = self._profile_start()
-        self.render(state)
-        self._profile_add("render_frame.render", profile_stage)
-        profile_stage = self._profile_start()
-        rl.end_drawing()
-        self._profile_add("render_frame.end_drawing", profile_stage)
+        try:
+            self.open()
+            profile_stage = self._profile_start()
+            rl.begin_drawing()
+            self._profile_add("render_frame.begin_drawing", profile_stage)
+            profile_stage = self._profile_start()
+            self.render(state)
+            self._profile_add("render_frame.render", profile_stage)
+            profile_stage = self._profile_start()
+            rl.end_drawing()
+            self._profile_add("render_frame.end_drawing", profile_stage)
+        except Exception as exc:
+            self._append_ambient_diag("ambient render_frame failed", exc)
+            raise
 
     def render(self, state: ClusterUiState, signal_lights: tuple[bool, bool] | None = None) -> None:
         """Draw one frame into the currently active raylib render target."""
@@ -860,10 +903,19 @@ class ClusterUiRenderer:
                 self._profile_add("render.ambient_hud", profile_stage)
                 return
             except Exception as exc:
-                if os.environ.get("CLUSTER_AMBIENT_DEBUG") == "1" and not self._ambient_render_error_logged:
-                    print(f"Ambient cluster render recovered with minimal HUD: {exc}", flush=True)
+                if not self._ambient_render_error_logged:
+                    self._append_ambient_diag("ambient render recovered with minimal HUD", exc)
+                    if os.environ.get("CLUSTER_AMBIENT_DEBUG") == "1":
+                        print(f"Ambient cluster render recovered with minimal HUD: {exc}", flush=True)
                     self._ambient_render_error_logged = True
-                self._draw_ambient_minimal_dashboard(state)
+                try:
+                    self._draw_ambient_minimal_dashboard(state)
+                except Exception as recovery_exc:
+                    self._append_ambient_diag("ambient minimal HUD failed; blank frame kept", recovery_exc)
+                    try:
+                        self._clear_ambient_dashboard()
+                    except Exception:
+                        pass
                 self._profile_add("render.ambient_recovery", profile_stage)
                 return
         if self.screen_mode == CLUSTER_SCREEN_MODE_DEBUG_GRAPH:
