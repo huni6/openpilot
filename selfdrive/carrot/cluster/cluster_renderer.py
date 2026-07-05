@@ -171,8 +171,8 @@ AMBIENT_GAP_BAR_GAP = 10.0
 AMBIENT_CLOCK_RIGHT_X = 1818.0
 AMBIENT_CLOCK_Y = 85.5
 AMBIENT_CLOCK_SIZE = 50.0
-AMBIENT_BSM_W = 118.0
-AMBIENT_BSM_COLOR = (255, 116, 32)
+AMBIENT_BSM_W = 150.0
+AMBIENT_BSM_COLOR = (211, 84, 0)
 AMBIENT_TEXT_EDGE_BOOST_ALPHA = int(os.environ.get("CLUSTER_AMBIENT_TEXT_EDGE_BOOST_ALPHA", "80"))
 SPEED_LIMIT_SIGN_CENTER_X = 460
 SPEED_LIMIT_SIGN_CENTER_Y = TURN_SIGNAL_CENTER_Y
@@ -2495,18 +2495,26 @@ class ClusterUiRenderer:
             self._draw_ambient_bsm_edge("right")
 
     def _draw_ambient_bsm_edge(self, side: str) -> None:
-        for index, alpha in enumerate((130, 80, 42, 20)):
-            width = AMBIENT_BSM_W - index * 24.0
-            if width <= 0.0:
+        steps = 30
+        step_w = AMBIENT_BSM_W / float(steps)
+        for index in range(steps):
+            t0 = index / float(steps)
+            t1 = (index + 1) / float(steps)
+            t = (t0 + t1) * 0.5
+            if t <= 0.2:
+                alpha = 255.0 - (t / 0.2) * (255.0 - 153.0)
+            else:
+                alpha = 153.0 * max(0.0, 1.0 - (t - 0.2) / 0.8)
+            if alpha <= 0.0:
                 continue
-            x = 0.0 if side == "left" else DESIGN_WIDTH - width
-            rl.draw_rectangle(int(x), 0, int(width), DESIGN_HEIGHT, rl_color(AMBIENT_BSM_COLOR, alpha))
-
-        rail_w = 16.0
-        rail_h = 232.0
-        rail_y = (DESIGN_HEIGHT - rail_h) * 0.5
-        rail_x = 26.0 if side == "left" else DESIGN_WIDTH - 26.0 - rail_w
-        self._rounded_rect(rail_x, rail_y, rail_w, rail_h, 8.0, (*AMBIENT_BSM_COLOR, 190), None, 0.0)
+            x = index * step_w if side == "left" else DESIGN_WIDTH - (index + 1) * step_w
+            rl.draw_rectangle(
+                int(round(x)),
+                0,
+                int(math.ceil(step_w + 1.0)),
+                DESIGN_HEIGHT,
+                rl_color(AMBIENT_BSM_COLOR, int(round(alpha))),
+            )
 
     def _draw_ambient_power_meter(self, state: ClusterUiState) -> None:
         direction, amount = ambient_power_gauge(state.accel_mps2)
