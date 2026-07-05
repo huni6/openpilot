@@ -2406,12 +2406,12 @@ class ClusterUiRenderer:
             except Exception as exc:
                 self._append_ambient_diag("ambient reference image failed", exc)
             self._draw_ambient_step("background", self._draw_ambient_background)
-            self._draw_ambient_step("bsm_edges", lambda: self._draw_ambient_bsm_edges(state))
             self._draw_ambient_step("power_meter", lambda: self._draw_ambient_power_meter(state))
             self._draw_ambient_step("speed", lambda: self._draw_ambient_speed(state))
             self._draw_ambient_step("drive_status", lambda: self._draw_ambient_drive_status(state))
             self._draw_ambient_step("clock", lambda: self._draw_ambient_clock(state))
             self._draw_ambient_step("phone_media", lambda: self._draw_phone_media_panel(state.phone_media, ambient=True))
+            self._draw_ambient_step("bsm_edges", lambda: self._draw_ambient_bsm_edges(state))
         finally:
             rl.rl_pop_matrix()
 
