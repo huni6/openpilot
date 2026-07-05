@@ -646,6 +646,7 @@ class ClusterUiRenderer:
         self._ambient_reference_texture = None
         self._ambient_reference_texture_path = ""
         self._ambient_render_error_logged = False
+        self._ambient_step_errors_logged: set[str] = set()
         self._route_video_texture = None
         self._route_video_size: tuple[int, int] | None = None
         self._route_video_frame_id: str | None = None
@@ -729,6 +730,14 @@ class ClusterUiRenderer:
                 return
             except Exception:
                 continue
+
+    def _draw_ambient_step(self, name: str, draw_fn) -> None:
+        try:
+            draw_fn()
+        except Exception as exc:
+            if name not in self._ambient_step_errors_logged:
+                self._append_ambient_diag(f"ambient section failed: {name}", exc)
+                self._ambient_step_errors_logged.add(name)
 
     def open(self, hidden: bool = False) -> None:
         if self._window_open:
@@ -2391,15 +2400,18 @@ class ClusterUiRenderer:
         rl.rl_push_matrix()
         rl.rl_scalef(sx, sy, 1.0)
         try:
-            if self._draw_ambient_reference_image():
-                return
-            self._draw_ambient_background()
-            self._draw_ambient_bsm_edges(state)
-            self._draw_ambient_power_meter(state)
-            self._draw_ambient_speed(state)
-            self._draw_ambient_drive_status(state)
-            self._draw_ambient_clock(state)
-            self._draw_phone_media_panel(state.phone_media, ambient=True)
+            try:
+                if self._draw_ambient_reference_image():
+                    return
+            except Exception as exc:
+                self._append_ambient_diag("ambient reference image failed", exc)
+            self._draw_ambient_step("background", self._draw_ambient_background)
+            self._draw_ambient_step("bsm_edges", lambda: self._draw_ambient_bsm_edges(state))
+            self._draw_ambient_step("power_meter", lambda: self._draw_ambient_power_meter(state))
+            self._draw_ambient_step("speed", lambda: self._draw_ambient_speed(state))
+            self._draw_ambient_step("drive_status", lambda: self._draw_ambient_drive_status(state))
+            self._draw_ambient_step("clock", lambda: self._draw_ambient_clock(state))
+            self._draw_ambient_step("phone_media", lambda: self._draw_phone_media_panel(state.phone_media, ambient=True))
         finally:
             rl.rl_pop_matrix()
 
@@ -2438,15 +2450,21 @@ class ClusterUiRenderer:
 
     def _draw_ambient_background(self) -> None:
         radius = math.hypot(DESIGN_WIDTH * 0.5, DESIGN_HEIGHT * 0.5)
-        if hasattr(rl, "draw_circle_gradient"):
-            rl.draw_circle_gradient(
-                int(DESIGN_WIDTH * 0.5),
-                int(DESIGN_HEIGHT * 0.5),
-                radius,
-                rl_color(AMBIENT_BG_CENTER),
-                rl_color(AMBIENT_BG_EDGE),
-            )
-        else:
+        gradient_drawn = False
+        draw_circle_gradient = getattr(rl, "draw_circle_gradient", None)
+        if draw_circle_gradient is not None:
+            try:
+                draw_circle_gradient(
+                    int(DESIGN_WIDTH * 0.5),
+                    int(DESIGN_HEIGHT * 0.5),
+                    radius,
+                    rl_color(AMBIENT_BG_CENTER),
+                    rl_color(AMBIENT_BG_EDGE),
+                )
+                gradient_drawn = True
+            except Exception:
+                gradient_drawn = False
+        if not gradient_drawn:
             rl.clear_background(rl_color(AMBIENT_BG_CENTER))
         rect = rl.Rectangle(0.0, 0.0, float(DESIGN_WIDTH), float(DESIGN_HEIGHT))
         self._draw_rounded_rect_lines_safe(rect, 16.0 / DESIGN_HEIGHT, 24, 1.0, rl_color(AMBIENT_BORDER))
@@ -2535,28 +2553,37 @@ class ClusterUiRenderer:
         fill_w = AMBIENT_POWER_FILL_W
         fill_h = AMBIENT_POWER_FILL_H
         half_h = fill_h * 0.5
-        if hasattr(rl, "draw_rectangle_gradient_v"):
-            rl.draw_rectangle_gradient_v(
-                int(fill_x),
-                int(fill_y),
-                int(fill_w),
-                int(math.ceil(half_h)),
-                rl_color((0, 122, 255)),
-                rl_color((125, 176, 227)),
-            )
-            rl.draw_rectangle_gradient_v(
-                int(fill_x),
-                int(fill_y + half_h),
-                int(fill_w),
-                int(math.ceil(half_h)),
-                rl_color((227, 130, 130)),
-                rl_color((255, 59, 48)),
-            )
-        else:
+        gradient_drawn = False
+        draw_rectangle_gradient_v = getattr(rl, "draw_rectangle_gradient_v", None)
+        if draw_rectangle_gradient_v is not None:
+            try:
+                draw_rectangle_gradient_v(
+                    int(fill_x),
+                    int(fill_y),
+                    int(fill_w),
+                    int(math.ceil(half_h)),
+                    rl_color((0, 122, 255)),
+                    rl_color((125, 176, 227)),
+                )
+                draw_rectangle_gradient_v(
+                    int(fill_x),
+                    int(fill_y + half_h),
+                    int(fill_w),
+                    int(math.ceil(half_h)),
+                    rl_color((227, 130, 130)),
+                    rl_color((255, 59, 48)),
+                )
+                gradient_drawn = True
+            except Exception:
+                gradient_drawn = False
+        if not gradient_drawn:
             rl.draw_rectangle(int(fill_x), int(fill_y), int(fill_w), int(math.ceil(half_h)), rl_color((0, 122, 255)))
             rl.draw_rectangle(int(fill_x), int(fill_y + half_h), int(fill_w), int(math.ceil(half_h)), rl_color((255, 59, 48)))
-        rl.draw_circle_v(rl.Vector2(fill_x + fill_w * 0.5, fill_y), fill_w * 0.5, rl_color((0, 122, 255)))
-        rl.draw_circle_v(rl.Vector2(fill_x + fill_w * 0.5, fill_y + fill_h), fill_w * 0.5, rl_color((255, 59, 48)))
+        try:
+            rl.draw_circle_v(rl.Vector2(fill_x + fill_w * 0.5, fill_y), fill_w * 0.5, rl_color((0, 122, 255)))
+            rl.draw_circle_v(rl.Vector2(fill_x + fill_w * 0.5, fill_y + fill_h), fill_w * 0.5, rl_color((255, 59, 48)))
+        except Exception:
+            pass
 
     def _draw_ambient_speed(self, state: ClusterUiState) -> None:
         display_speed_kph = state.display_speed_kph if state.display_speed_kph is not None else state.speed_kph
@@ -4194,24 +4221,36 @@ class ClusterUiRenderer:
     def _draw_rounded_rect_safe(rect, roundness: float, segments: int, color) -> None:
         draw_rounded = getattr(rl, "draw_rectangle_rounded", None)
         if draw_rounded is not None:
-            draw_rounded(rect, roundness, segments, color)
-            return
+            try:
+                draw_rounded(rect, roundness, segments, color)
+                return
+            except Exception:
+                pass
         draw_rec = getattr(rl, "draw_rectangle_rec", None)
         if draw_rec is not None:
-            draw_rec(rect, color)
-            return
+            try:
+                draw_rec(rect, color)
+                return
+            except Exception:
+                pass
         rl.draw_rectangle(int(rect.x), int(rect.y), int(rect.width), int(rect.height), color)
 
     @staticmethod
     def _draw_rounded_rect_lines_safe(rect, roundness: float, segments: int, line_thick: float, color) -> None:
         draw_rounded_lines = getattr(rl, "draw_rectangle_rounded_lines_ex", None)
         if draw_rounded_lines is not None:
-            draw_rounded_lines(rect, roundness, segments, line_thick, color)
-            return
+            try:
+                draw_rounded_lines(rect, roundness, segments, line_thick, color)
+                return
+            except Exception:
+                pass
         draw_lines_ex = getattr(rl, "draw_rectangle_lines_ex", None)
         if draw_lines_ex is not None:
-            draw_lines_ex(rect, line_thick, color)
-            return
+            try:
+                draw_lines_ex(rect, line_thick, color)
+                return
+            except Exception:
+                pass
         rl.draw_rectangle_lines(int(rect.x), int(rect.y), int(rect.width), int(rect.height), color)
 
     def _rounded_rect_glow(
@@ -4329,23 +4368,26 @@ class ClusterUiRenderer:
         anchor: str = "left",
         spacing: float = 0.0,
     ) -> None:
-        font = self._ambient_font(weight)
-        text_width, text_height = self._measure_text_with_font(font, text, size, spacing)
-        draw_x = x
-        draw_y = y
-        if anchor == "center":
-            draw_x = x - text_width * 0.5
-            draw_y = y - text_height * 0.5
-        elif anchor == "left":
-            draw_y = y - text_height * 0.5
-        elif anchor == "right":
-            draw_x = x - text_width
-            draw_y = y - text_height * 0.5
-        rl.draw_text_ex(font, text, rl.Vector2(draw_x, draw_y), size, spacing, rl_color(color))
-        r, g, b, a = rgba_key(color)
-        if a > 0 and AMBIENT_TEXT_EDGE_BOOST_ALPHA > 0:
-            boost_alpha = int(min(AMBIENT_TEXT_EDGE_BOOST_ALPHA, a * 0.32))
-            rl.draw_text_ex(font, text, rl.Vector2(draw_x, draw_y), size, spacing, rl_color((r, g, b, boost_alpha)))
+        try:
+            font = self._ambient_font(weight)
+            text_width, text_height = self._measure_text_with_font(font, text, size, spacing)
+            draw_x = x
+            draw_y = y
+            if anchor == "center":
+                draw_x = x - text_width * 0.5
+                draw_y = y - text_height * 0.5
+            elif anchor == "left":
+                draw_y = y - text_height * 0.5
+            elif anchor == "right":
+                draw_x = x - text_width
+                draw_y = y - text_height * 0.5
+            rl.draw_text_ex(font, text, rl.Vector2(draw_x, draw_y), size, spacing, rl_color(color))
+            r, g, b, a = rgba_key(color)
+            if a > 0 and AMBIENT_TEXT_EDGE_BOOST_ALPHA > 0:
+                boost_alpha = int(min(AMBIENT_TEXT_EDGE_BOOST_ALPHA, a * 0.32))
+                rl.draw_text_ex(font, text, rl.Vector2(draw_x, draw_y), size, spacing, rl_color((r, g, b, boost_alpha)))
+        except Exception:
+            self._draw_plain_text(text, x, y, size, color, anchor)
 
     def _draw_ambient_text_with_stroke(
         self,
@@ -4502,8 +4544,11 @@ class ClusterUiRenderer:
         measured = self._text_measure_cache.get(key)
         if measured is not None:
             return measured
-        text_size = rl.measure_text_ex(font, text, size, spacing)
-        measured = (float(text_size.x), float(text_size.y))
+        try:
+            text_size = rl.measure_text_ex(font, text, size, spacing)
+            measured = (float(text_size.x), float(text_size.y))
+        except Exception:
+            measured = (float(len(text)) * float(size) * 0.56, float(size))
         self._text_measure_cache[key] = measured
         return measured
 
