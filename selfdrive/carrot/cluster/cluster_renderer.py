@@ -2495,7 +2495,7 @@ class ClusterUiRenderer:
             self._draw_ambient_bsm_edge("right")
 
     def _draw_ambient_bsm_edge(self, side: str) -> None:
-        steps = 30
+        steps = max(1, int(round(AMBIENT_BSM_W)))
         step_w = AMBIENT_BSM_W / float(steps)
         for index in range(steps):
             t0 = index / float(steps)
@@ -2511,7 +2511,7 @@ class ClusterUiRenderer:
             rl.draw_rectangle(
                 int(round(x)),
                 0,
-                int(math.ceil(step_w + 1.0)),
+                int(math.ceil(step_w)),
                 DESIGN_HEIGHT,
                 rl_color(AMBIENT_BSM_COLOR, int(round(alpha))),
             )
