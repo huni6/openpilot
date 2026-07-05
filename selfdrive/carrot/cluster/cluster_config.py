@@ -437,6 +437,17 @@ def normalize_cluster_radar_source_color_mode(value: object) -> int:
     return CLUSTER_RADAR_SOURCE_COLOR_DEFAULT
 
 
+def kst_clock_text(*, include_seconds: bool = False, now: float | None = None) -> str:
+    timestamp = time.time() if now is None else float(now)
+    fmt = "%H:%M:%S" if include_seconds else "%H:%M"
+    return time.strftime(fmt, time.gmtime(timestamp + KST_OFFSET_SECONDS))
+
+
+def kst_time_tuple(now: float | None = None) -> time.struct_time:
+    timestamp = time.time() if now is None else float(now)
+    return time.gmtime(timestamp + KST_OFFSET_SECONDS)
+
+
 def current_cluster_theme(mode: object = "auto", now: float | None = None) -> ClusterTheme:
     normalized = normalize_cluster_theme_mode(mode)
     if normalized == "dark":
@@ -444,16 +455,10 @@ def current_cluster_theme(mode: object = "auto", now: float | None = None) -> Cl
     if normalized == "light":
         return LIGHT_CLUSTER_THEME
 
-    local_hour = time.localtime(now).tm_hour if now is not None else time.localtime().tm_hour
+    local_hour = kst_time_tuple(now).tm_hour
     if local_hour >= AUTO_DARK_START_HOUR or local_hour < AUTO_LIGHT_START_HOUR:
         return DARK_CLUSTER_THEME
     return LIGHT_CLUSTER_THEME
-
-
-def kst_clock_text(*, include_seconds: bool = False, now: float | None = None) -> str:
-    timestamp = time.time() if now is None else float(now)
-    fmt = "%H:%M:%S" if include_seconds else "%H:%M"
-    return time.strftime(fmt, time.gmtime(timestamp + KST_OFFSET_SECONDS))
 
 
 BG = LIGHT_CLUSTER_THEME.bg

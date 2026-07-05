@@ -15,6 +15,12 @@ from openpilot.system.ui.widgets import Widget
 SET_SPEED_NA = 255
 KM_TO_MILE = 0.621371
 CRUISE_DISABLED_CHAR = '–'
+KST_OFFSET_SECONDS = 9 * 60 * 60
+
+
+def kst_time(timestamp: float | None = None) -> time.struct_time:
+  base = time.time() if timestamp is None else float(timestamp)
+  return time.gmtime(base + KST_OFFSET_SECONDS)
 
 
 @dataclass(frozen=True)
@@ -827,7 +833,7 @@ class HudRenderer(Widget):
     if show_datetime <= 0:
       return
 
-    now = time.localtime()
+    now = kst_time()
     weekdays_ko = ["일", "월", "화", "수", "목", "금", "토"]
 
     x = int(rect.x + 170)
@@ -990,7 +996,7 @@ class HudRenderer(Widget):
     if remain_sec <= 0:
       return ""
 
-    eta_tm = time.localtime(time.time() + remain_sec)
+    eta_tm = kst_time(time.time() + remain_sec)
     remain_min = remain_sec / 60.0
     return f"도착: {remain_min:.1f}분({eta_tm.tm_hour:02d}:{eta_tm.tm_min:02d})"
 

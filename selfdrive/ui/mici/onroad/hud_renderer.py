@@ -25,6 +25,11 @@ EventName = log.OnroadEvent.EventName
 SET_SPEED_NA = 255
 KM_TO_MILE = 0.621371
 CRUISE_DISABLED_CHAR = '–'
+KST_OFFSET_SECONDS = 9 * 60 * 60
+
+
+def kst_datetime() -> datetime:
+  return datetime.utcfromtimestamp(time.time() + KST_OFFSET_SECONDS)
 
 SET_SPEED_PERSISTENCE = 2.5  # seconds
 DEFAULT_MAX_LAT_ACCEL = 3.0  # m/s^2
@@ -359,7 +364,7 @@ class HudRenderer(Widget):
 
 
   def _draw_wheel_side_info(self, wheel_txt, pos_x: int, pos_y: int) -> None:
-    now = datetime.now()
+    now = kst_datetime()
 
     try:
       show_date_time = int(ui_state.show_date_time)
@@ -887,4 +892,3 @@ class HudRenderer(Widget):
     draw_text_ui_style(remain, text_x, text_y, remain_font, rl.Color(255, 255, 255, 235), font=self._font_display, border_width=1.0, shadow_offset=8.0, align="left_top", y_offset=0.0)
 
     return True
-

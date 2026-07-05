@@ -25,6 +25,7 @@ from cluster_config import (
     CLUSTER_RADAR_DISPLAY_PARAM,
     CLUSTER_RADAR_INFO_PARAM,
     CLUSTER_RADAR_SOURCE_COLOR_PARAM,
+    CLUSTER_SCREEN_MODE_DEFAULT,
     CLUSTER_SCREEN_MODE_DEBUG,
     CLUSTER_SCREEN_MODE_DEBUG_GRAPH,
     CLUSTER_SCREEN_MODE_DEBUG_GRAPH_RIGHT,
@@ -629,6 +630,7 @@ def run_demo(
     active_theme_mode = theme_override or (theme_param_reader.read() if theme_param_reader is not None else "auto")
     screen_mode_param_reader = ClusterScreenModeParamReader()
     active_screen_mode = screen_mode_param_reader.read()
+    effective_screen_mode = CLUSTER_SCREEN_MODE_DEFAULT
     camera_view_param_reader = ClusterCameraViewModeParamReader()
     active_camera_view_mode = camera_view_param_reader.read()
     radar_info_param_reader = ClusterRadarInfoParamReader()
@@ -649,9 +651,13 @@ def run_demo(
         frame_height,
         target_fps=max(0, int(round(target_fps))),
         theme_mode=active_theme_mode,
-        screen_mode=active_screen_mode,
+        screen_mode=effective_screen_mode,
     )
-    print(f"{CLUSTER_SCREEN_MODE_PARAM} initial: {active_screen_mode}", flush=True)
+    print(
+        f"{CLUSTER_SCREEN_MODE_PARAM} initial: {active_screen_mode} "
+        f"(ambient effective: {effective_screen_mode})",
+        flush=True,
+    )
     print(f"{CLUSTER_CAMERA_VIEW_MODE_PARAM} initial: {active_camera_view_mode}", flush=True)
     print(
         f"{CLUSTER_RADAR_INFO_PARAM} initial: {active_radar_info_mode} "
@@ -674,9 +680,9 @@ def run_demo(
         live_source.set_profile_enabled(profile_render)
         live_source.set_hud_debug_mode(active_hud_debug_mode)
         live_source.set_debug_panels_enabled(
-            live_debug=live_debug_panel_enabled(active_screen_mode),
-            debug_plot=live_debug_plot_enabled(active_screen_mode),
-            navi_debug=live_navi_debug_enabled(active_screen_mode),
+            live_debug=False,
+            debug_plot=False,
+            navi_debug=False,
         )
     route_source = None
     if input_mode == "route":
@@ -813,17 +819,19 @@ def run_demo(
                 next_theme_param_read = now + THEME_PARAM_POLL_SECONDS
             if now >= next_screen_mode_param_read:
                 next_screen_mode = screen_mode_param_reader.read()
-                if next_screen_mode != renderer.screen_mode:
+                if next_screen_mode != active_screen_mode:
                     print(
-                        f"{CLUSTER_SCREEN_MODE_PARAM} updated: {renderer.screen_mode} -> {next_screen_mode}",
+                        f"{CLUSTER_SCREEN_MODE_PARAM} updated: {active_screen_mode} -> {next_screen_mode} "
+                        f"(ambient effective: {effective_screen_mode})",
                         flush=True,
                     )
-                    renderer.set_screen_mode(next_screen_mode)
+                    active_screen_mode = next_screen_mode
+                    renderer.set_screen_mode(effective_screen_mode)
                     if live_source is not None:
                         live_source.set_debug_panels_enabled(
-                            live_debug=live_debug_panel_enabled(next_screen_mode),
-                            debug_plot=live_debug_plot_enabled(next_screen_mode),
-                            navi_debug=live_navi_debug_enabled(next_screen_mode),
+                            live_debug=False,
+                            debug_plot=False,
+                            navi_debug=False,
                         )
                 next_screen_mode_param_read = now + SCREEN_MODE_PARAM_POLL_SECONDS
             if now >= next_camera_view_param_read:
