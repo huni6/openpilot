@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from cluster_config import BLUE, DEFAULT_LANE_WIDTH_M, SHOW_PLOT_MODE_PARAM
+from cluster_config import BLUE, DEFAULT_LANE_WIDTH_M, MAX_SPEED_KPH, SHOW_PLOT_MODE_PARAM
 from cluster_models import (
     ClusterUiState,
     DebugPlotSnapshot,
@@ -1020,7 +1020,7 @@ class OpenpilotLiveSource:
         if not self._service_alive("carState"):
             return
         try:
-            self.parser.current_speed_kph = clamp(float(self.sm["carState"].vEgo) * 3.6, 0.0, 140.0)
+            self.parser.current_speed_kph = clamp(float(self.sm["carState"].vEgo) * 3.6, 0.0, MAX_SPEED_KPH)
         except Exception:
             return
 

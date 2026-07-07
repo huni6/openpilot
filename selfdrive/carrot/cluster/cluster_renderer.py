@@ -135,17 +135,13 @@ AMBIENT_BODY_BG = (3, 7, 18)
 AMBIENT_BG_EDGE = (3, 5, 10)
 AMBIENT_BG_CENTER = (7, 13, 26)
 AMBIENT_BORDER = (255, 255, 255, 51)
-AMBIENT_SPEED_CENTER_X = 312.0
+AMBIENT_SPEED_CENTER_X = 360.0
 AMBIENT_SPEED_CENTER_Y = 226.5
 AMBIENT_SPEED_SIZE = 230.0
-AMBIENT_SPEED_UNIT_X = 309.0
+AMBIENT_SPEED_UNIT_X = 360.0
 AMBIENT_SPEED_UNIT_Y = 340.0
 AMBIENT_SPEED_UNIT_SIZE = 32.0
 AMBIENT_POWER_CENTER_X = 125.0
-AMBIENT_POWER_TRACK_X = 101.0
-AMBIENT_POWER_TRACK_Y = 118.0
-AMBIENT_POWER_TRACK_W = 48.0
-AMBIENT_POWER_TRACK_H = 244.0
 AMBIENT_POWER_FILL_X = 112.0
 AMBIENT_POWER_FILL_Y = 130.0
 AMBIENT_POWER_FILL_W = 26.0
@@ -153,6 +149,11 @@ AMBIENT_POWER_FILL_H = 220.0
 AMBIENT_POWER_HANDLE_W = 40.0
 AMBIENT_POWER_HANDLE_H = 6.0
 AMBIENT_TOP_ROW_Y = 92.5
+AMBIENT_SPEED_LIMIT_CENTER_X = 666.0
+AMBIENT_SPEED_LIMIT_RADIUS = 30.0
+AMBIENT_SPEED_LIMIT_INNER_RADIUS = 24.0
+AMBIENT_SPEED_LIMIT_TEXT_SIZE = 27.0
+AMBIENT_SPEED_LIMIT_SOURCE_SIZE = 10.0
 AMBIENT_GEAR_X = 760.8
 AMBIENT_GEAR_SIZE = 52.0
 AMBIENT_DIVIDER_H = 42.0
@@ -168,11 +169,15 @@ AMBIENT_GAP_Y = 142.0
 AMBIENT_GAP_BAR_W = 30.0
 AMBIENT_GAP_BAR_H = 12.0
 AMBIENT_GAP_BAR_GAP = 10.0
-AMBIENT_CLOCK_RIGHT_X = 1818.0
+AMBIENT_CLOCK_RIGHT_X = 1890.0
 AMBIENT_CLOCK_Y = 85.5
 AMBIENT_CLOCK_SIZE = 50.0
 AMBIENT_BSM_W = 150.0
-AMBIENT_BSM_COLOR = (211, 84, 0)
+AMBIENT_BSM_COLOR = (204, 88, 0)
+AMBIENT_BSM_EDGE_ALPHA = 155.0
+AMBIENT_BSM_CORE_ALPHA = 68.0
+AMBIENT_LFA_ACTIVE_COLOR = (0, 255, 0)
+AMBIENT_LFA_INACTIVE_COLOR = (126, 135, 148)
 AMBIENT_TEXT_EDGE_BOOST_ALPHA = int(os.environ.get("CLUSTER_AMBIENT_TEXT_EDGE_BOOST_ALPHA", "80"))
 SPEED_LIMIT_SIGN_CENTER_X = 460
 SPEED_LIMIT_SIGN_CENTER_Y = TURN_SIGNAL_CENTER_Y
@@ -1564,7 +1569,7 @@ class ClusterUiRenderer:
         if self._ambient_cruise_icon_texture is None:
             self._ambient_cruise_icon_texture = self._load_recolored_icon_texture(AMBIENT_CRUISE_ICON_PATH, WHITE, "Ambient cruise")
         if self._ambient_lane_assist_icon_texture is None:
-            self._ambient_lane_assist_icon_texture = self._load_recolored_icon_texture(AMBIENT_LANE_ASSIST_ICON_PATH, (16, 185, 129), "Ambient lane assist")
+            self._ambient_lane_assist_icon_texture = self._load_recolored_icon_texture(AMBIENT_LANE_ASSIST_ICON_PATH, WHITE, "Ambient lane assist")
 
     def _load_icon_texture(self, path: Path, label: str):
         if not path.exists():
@@ -2481,6 +2486,7 @@ class ClusterUiRenderer:
             gear_text = (state.gear_text or "-").strip().upper()[:2] or "-"
             self._draw_plain_text(speed_text, AMBIENT_SPEED_CENTER_X, AMBIENT_SPEED_CENTER_Y, AMBIENT_SPEED_SIZE, WHITE, anchor="center")
             self._draw_plain_text("km/h", AMBIENT_SPEED_UNIT_X, AMBIENT_SPEED_UNIT_Y, AMBIENT_SPEED_UNIT_SIZE, (107, 114, 128), anchor="center")
+            self._draw_ambient_speed_limit(state)
             self._draw_plain_text(gear_text, AMBIENT_GEAR_X, AMBIENT_TOP_ROW_Y, AMBIENT_GEAR_SIZE, WHITE, anchor="center")
             self._draw_plain_text(self._cruise_set_speed_text(state), AMBIENT_CRUISE_SPEED_X, AMBIENT_TOP_ROW_Y, AMBIENT_CRUISE_SPEED_SIZE, WHITE)
             self._draw_plain_text(kst_clock_text(), AMBIENT_CLOCK_RIGHT_X, AMBIENT_CLOCK_Y, AMBIENT_CLOCK_SIZE, (229, 231, 235), anchor="right")
@@ -2502,9 +2508,9 @@ class ClusterUiRenderer:
             t1 = (index + 1) / float(steps)
             t = (t0 + t1) * 0.5
             if t <= 0.2:
-                alpha = 255.0 - (t / 0.2) * (255.0 - 153.0)
+                alpha = AMBIENT_BSM_EDGE_ALPHA - (t / 0.2) * (AMBIENT_BSM_EDGE_ALPHA - AMBIENT_BSM_CORE_ALPHA)
             else:
-                alpha = 153.0 * max(0.0, 1.0 - (t - 0.2) / 0.8)
+                alpha = AMBIENT_BSM_CORE_ALPHA * pow(max(0.0, 1.0 - (t - 0.2) / 0.8), 1.35)
             if alpha <= 0.0:
                 continue
             x = index * step_w if side == "left" else DESIGN_WIDTH - (index + 1) * step_w
@@ -2518,17 +2524,14 @@ class ClusterUiRenderer:
 
     def _draw_ambient_power_meter(self, state: ClusterUiState) -> None:
         direction, amount = ambient_power_gauge(state.accel_mps2)
-        track_x = AMBIENT_POWER_TRACK_X
-        track_y = AMBIENT_POWER_TRACK_Y
-        track_w = AMBIENT_POWER_TRACK_W
-        track_h = AMBIENT_POWER_TRACK_H
-        mid_y = AMBIENT_POWER_FILL_Y + AMBIENT_POWER_FILL_H * 0.5 + AMBIENT_POWER_HANDLE_H * 0.5
-        top_h = AMBIENT_POWER_FILL_H * 0.5
-        bottom_h = AMBIENT_POWER_FILL_H * 0.5
+        fill_y = AMBIENT_POWER_FILL_Y
+        fill_h = AMBIENT_POWER_FILL_H
+        mid_y = fill_y + fill_h * 0.5 + AMBIENT_POWER_HANDLE_H * 0.5
+        top_h = fill_h * 0.5
+        bottom_h = fill_h * 0.5
 
         self._draw_ambient_text("+", AMBIENT_POWER_CENTER_X, 85.0, 32.0, (96, 165, 250), weight="regular", anchor="center")
         self._draw_ambient_text("-", AMBIENT_POWER_CENTER_X, 394.0, 32.0, (248, 113, 113), weight="regular", anchor="center")
-        self._rounded_rect(track_x, track_y, track_w, track_h, 22.0, (0, 0, 0, 0), (255, 255, 255, 26), 2.0)
         self._draw_power_gradient()
 
         if amount > 0.0:
@@ -2543,7 +2546,7 @@ class ClusterUiRenderer:
         else:
             handle_y = mid_y
 
-        handle_y = clamp(handle_y, track_y + 8.0, track_y + track_h - 8.0)
+        handle_y = clamp(handle_y, fill_y + AMBIENT_POWER_HANDLE_H * 0.5, fill_y + fill_h + AMBIENT_POWER_HANDLE_H * 0.5)
         self._rounded_rect(
             AMBIENT_POWER_CENTER_X - AMBIENT_POWER_HANDLE_W * 0.5,
             handle_y - AMBIENT_POWER_HANDLE_H * 0.5,
@@ -2560,38 +2563,33 @@ class ClusterUiRenderer:
         fill_y = AMBIENT_POWER_FILL_Y
         fill_w = AMBIENT_POWER_FILL_W
         fill_h = AMBIENT_POWER_FILL_H
-        half_h = fill_h * 0.5
-        gradient_drawn = False
-        draw_rectangle_gradient_v = getattr(rl, "draw_rectangle_gradient_v", None)
-        if draw_rectangle_gradient_v is not None:
-            try:
-                draw_rectangle_gradient_v(
-                    int(fill_x),
-                    int(fill_y),
-                    int(fill_w),
-                    int(math.ceil(half_h)),
-                    rl_color((0, 122, 255)),
-                    rl_color((125, 176, 227)),
-                )
-                draw_rectangle_gradient_v(
-                    int(fill_x),
-                    int(fill_y + half_h),
-                    int(fill_w),
-                    int(math.ceil(half_h)),
-                    rl_color((227, 130, 130)),
-                    rl_color((255, 59, 48)),
-                )
-                gradient_drawn = True
-            except Exception:
-                gradient_drawn = False
-        if not gradient_drawn:
-            rl.draw_rectangle(int(fill_x), int(fill_y), int(fill_w), int(math.ceil(half_h)), rl_color((0, 122, 255)))
-            rl.draw_rectangle(int(fill_x), int(fill_y + half_h), int(fill_w), int(math.ceil(half_h)), rl_color((255, 59, 48)))
-        try:
-            rl.draw_circle_v(rl.Vector2(fill_x + fill_w * 0.5, fill_y), fill_w * 0.5, rl_color((0, 122, 255)))
-            rl.draw_circle_v(rl.Vector2(fill_x + fill_w * 0.5, fill_y + fill_h), fill_w * 0.5, rl_color((255, 59, 48)))
-        except Exception:
-            pass
+        center_x = fill_x + fill_w * 0.5
+        radius = fill_w * 0.5
+        row_count = max(1, int(round(fill_h)))
+
+        def mix(a: tuple[int, int, int], b: tuple[int, int, int], t: float) -> tuple[int, int, int]:
+            ratio = clamp(t, 0.0, 1.0)
+            return tuple(int(round(a[index] + (b[index] - a[index]) * ratio)) for index in range(3))
+
+        for row in range(row_count):
+            y = fill_y + row
+            t = (row + 0.5) / float(row_count)
+            if t <= 0.5:
+                color = mix((0, 122, 255), (125, 176, 227), t / 0.5)
+            else:
+                color = mix((227, 130, 130), (255, 59, 48), (t - 0.5) / 0.5)
+            y_center = y + 0.5
+            if y_center < fill_y + radius:
+                dy = fill_y + radius - y_center
+                half_w = math.sqrt(max(0.0, radius * radius - dy * dy))
+            elif y_center > fill_y + fill_h - radius:
+                dy = y_center - (fill_y + fill_h - radius)
+                half_w = math.sqrt(max(0.0, radius * radius - dy * dy))
+            else:
+                half_w = radius
+            x0 = int(round(center_x - half_w))
+            x1 = int(round(center_x + half_w))
+            rl.draw_rectangle(x0, int(round(y)), max(1, x1 - x0), 1, rl_color(color))
 
     def _draw_ambient_speed(self, state: ClusterUiState) -> None:
         display_speed_kph = state.display_speed_kph if state.display_speed_kph is not None else state.speed_kph
@@ -2611,6 +2609,7 @@ class ClusterUiRenderer:
 
     def _draw_ambient_drive_status(self, state: ClusterUiState) -> None:
         gear_text = (state.gear_text or "-").strip().upper()[:2] or "-"
+        self._draw_ambient_speed_limit(state)
         self._draw_ambient_text(
             gear_text,
             AMBIENT_GEAR_X,
@@ -2625,6 +2624,34 @@ class ClusterUiRenderer:
         self._draw_ambient_divider(1076.0)
         self._draw_ambient_lfa_icon(state)
         self._draw_ambient_gap_bars(state)
+
+    def _draw_ambient_speed_limit(self, state: ClusterUiState) -> None:
+        if state.speed_limit_kph is None and state.navi_debug is None:
+            return
+        center = rl.Vector2(AMBIENT_SPEED_LIMIT_CENTER_X, AMBIENT_TOP_ROW_Y)
+        rl.draw_circle_v(center, AMBIENT_SPEED_LIMIT_RADIUS, rl_color(RED))
+        rl.draw_circle_v(center, AMBIENT_SPEED_LIMIT_INNER_RADIUS, rl_color(WHITE))
+        limit_text = "--" if state.speed_limit_kph is None else str(int(state.speed_limit_kph))
+        self._draw_ambient_text(
+            limit_text,
+            AMBIENT_SPEED_LIMIT_CENTER_X,
+            AMBIENT_TOP_ROW_Y - 4.0,
+            AMBIENT_SPEED_LIMIT_TEXT_SIZE,
+            TEXT,
+            weight="medium",
+            anchor="center",
+        )
+        source_label = speed_limit_source_label(state.speed_limit_source) if state.speed_limit_kph is not None else ""
+        if source_label:
+            self._draw_ambient_text(
+                source_label,
+                AMBIENT_SPEED_LIMIT_CENTER_X,
+                AMBIENT_TOP_ROW_Y + 17.0,
+                AMBIENT_SPEED_LIMIT_SOURCE_SIZE,
+                TEXT,
+                weight="regular",
+                anchor="center",
+            )
 
     def _draw_ambient_divider(self, x: float) -> None:
         y0 = AMBIENT_TOP_ROW_Y - AMBIENT_DIVIDER_H * 0.5
@@ -2669,14 +2696,16 @@ class ClusterUiRenderer:
 
     def _draw_ambient_lfa_icon(self, state: ClusterUiState) -> None:
         active = bool(state.lfa_active)
+        tint = AMBIENT_LFA_ACTIVE_COLOR if active else AMBIENT_LFA_INACTIVE_COLOR
+        if active:
+            self._draw_ambient_lfa_shape(tint, 255)
+            return
         if self._ambient_lane_assist_icon_texture is not None and self._ambient_lane_assist_icon_texture.width > 0:
             source = rl.Rectangle(0.0, 0.0, float(self._ambient_lane_assist_icon_texture.width), float(self._ambient_lane_assist_icon_texture.height))
             dest = rl.Rectangle(AMBIENT_LFA_CENTER_X - 36.0, AMBIENT_TOP_ROW_Y - 23.0, 72.0, 46.0)
-            alpha = 242 if active else 185
-            rl.draw_texture_pro(self._ambient_lane_assist_icon_texture, source, dest, rl.Vector2(0.0, 0.0), 0.0, rl_color(WHITE, alpha))
+            rl.draw_texture_pro(self._ambient_lane_assist_icon_texture, source, dest, rl.Vector2(0.0, 0.0), 0.0, rl_color(tint, 130))
             return
         texture = self._lfa_active_texture if active and self._lfa_active_texture is not None else self._lfa_texture
-        tint = (16, 185, 129) if active else (126, 135, 148)
         if texture is not None and texture.width > 0 and texture.height > 0:
             icon_w = 72.0
             icon_h = 46.0
@@ -2691,28 +2720,33 @@ class ClusterUiRenderer:
             self._draw_ambient_lfa_wheel(tint)
             return
 
+        self._draw_ambient_lfa_shape(tint, 185)
+
+    def _draw_ambient_lfa_shape(self, color: tuple[int, int, int], alpha: int) -> None:
         left_x = AMBIENT_LFA_CENTER_X - 34.0
         right_x = AMBIENT_LFA_CENTER_X + 34.0
         y0 = AMBIENT_TOP_ROW_Y + 24.0
         y1 = AMBIENT_TOP_ROW_Y - 24.0
-        rl.draw_line_ex(rl.Vector2(left_x, y0), rl.Vector2(left_x + 12.0, y1), 4.0, rl_color(tint, 220))
-        rl.draw_line_ex(rl.Vector2(right_x, y0), rl.Vector2(right_x - 12.0, y1), 4.0, rl_color(tint, 220))
-        self._draw_ambient_lfa_wheel(tint)
+        draw_alpha = int(clamp(alpha, 0, 255))
+        rl.draw_line_ex(rl.Vector2(left_x, y0), rl.Vector2(left_x + 12.0, y1), 5.0, rl_color(color, draw_alpha))
+        rl.draw_line_ex(rl.Vector2(right_x, y0), rl.Vector2(right_x - 12.0, y1), 5.0, rl_color(color, draw_alpha))
+        self._draw_ambient_lfa_wheel(color, draw_alpha)
 
-    def _draw_ambient_lfa_wheel(self, color: tuple[int, int, int]) -> None:
-        rl.draw_circle_lines(int(AMBIENT_LFA_CENTER_X), int(AMBIENT_TOP_ROW_Y), 17.0, rl_color(color, 220))
-        rl.draw_circle_lines(int(AMBIENT_LFA_CENTER_X), int(AMBIENT_TOP_ROW_Y + 1.0), 8.0, rl_color(color, 220))
+    def _draw_ambient_lfa_wheel(self, color: tuple[int, int, int], alpha: int = 220) -> None:
+        draw_alpha = int(clamp(alpha, 0, 255))
+        rl.draw_circle_lines(int(AMBIENT_LFA_CENTER_X), int(AMBIENT_TOP_ROW_Y), 17.0, rl_color(color, draw_alpha))
+        rl.draw_circle_lines(int(AMBIENT_LFA_CENTER_X), int(AMBIENT_TOP_ROW_Y + 1.0), 8.0, rl_color(color, draw_alpha))
         rl.draw_line_ex(
             rl.Vector2(AMBIENT_LFA_CENTER_X - 10.0, AMBIENT_TOP_ROW_Y + 7.0),
             rl.Vector2(AMBIENT_LFA_CENTER_X + 10.0, AMBIENT_TOP_ROW_Y + 7.0),
             3.0,
-            rl_color(color, 220),
+            rl_color(color, draw_alpha),
         )
         rl.draw_line_ex(
             rl.Vector2(AMBIENT_LFA_CENTER_X, AMBIENT_TOP_ROW_Y + 7.0),
             rl.Vector2(AMBIENT_LFA_CENTER_X, AMBIENT_TOP_ROW_Y + 17.0),
             3.0,
-            rl_color(color, 220),
+            rl_color(color, draw_alpha),
         )
 
     def _draw_ambient_gap_bars(self, state: ClusterUiState) -> None:
