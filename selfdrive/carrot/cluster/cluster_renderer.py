@@ -56,7 +56,7 @@ from cluster_models import (
     PhoneMediaInfo,
     RouteOverlay,
 )
-from cluster_layout import ambient_bsm_edges, ambient_power_gauge
+from cluster_layout import ambient_bsm_edges, ambient_power_gauge, smooth_ambient_accel
 from cluster_scene import (
     ClusterScene,
     MeshStrip,
@@ -172,10 +172,10 @@ AMBIENT_GAP_BAR_GAP = 10.0
 AMBIENT_CLOCK_RIGHT_X = 1890.0
 AMBIENT_CLOCK_Y = 85.5
 AMBIENT_CLOCK_SIZE = 50.0
-AMBIENT_BSM_W = 150.0
+AMBIENT_BSM_W = 300.0
 AMBIENT_BSM_COLOR = (204, 88, 0)
-AMBIENT_BSM_EDGE_ALPHA = 155.0
-AMBIENT_BSM_CORE_ALPHA = 68.0
+AMBIENT_BSM_EDGE_ALPHA = 190.0
+AMBIENT_BSM_CORE_ALPHA = 90.0
 AMBIENT_LFA_ACTIVE_COLOR = (46, 192, 79)
 AMBIENT_LFA_INACTIVE_COLOR = (126, 135, 148)
 AMBIENT_TEXT_EDGE_BOOST_ALPHA = int(os.environ.get("CLUSTER_AMBIENT_TEXT_EDGE_BOOST_ALPHA", "80"))
@@ -622,6 +622,8 @@ class ClusterUiRenderer:
         self._ambient_fonts: dict[str, object] = {}
         self._owned_ambient_fonts: set[str] = set()
         self._accel_text_width = 0.0
+        self._ambient_accel_display = 0.0
+        self._ambient_accel_updated_at: float | None = None
         self._capture_target = None
         self._portrait_upload_target = None
         self._portrait_upload_target_size: tuple[int, int] | None = None
@@ -2501,16 +2503,16 @@ class ClusterUiRenderer:
             self._draw_ambient_bsm_edge("right")
 
     def _draw_ambient_bsm_edge(self, side: str) -> None:
-        steps = max(1, int(round(AMBIENT_BSM_W)))
+        steps = max(1, int(round(AMBIENT_BSM_W / 3.0)))
         step_w = AMBIENT_BSM_W / float(steps)
         for index in range(steps):
             t0 = index / float(steps)
             t1 = (index + 1) / float(steps)
             t = (t0 + t1) * 0.5
-            if t <= 0.2:
-                alpha = AMBIENT_BSM_EDGE_ALPHA - (t / 0.2) * (AMBIENT_BSM_EDGE_ALPHA - AMBIENT_BSM_CORE_ALPHA)
+            if t <= 0.25:
+                alpha = AMBIENT_BSM_EDGE_ALPHA - (t / 0.25) * (AMBIENT_BSM_EDGE_ALPHA - AMBIENT_BSM_CORE_ALPHA)
             else:
-                alpha = AMBIENT_BSM_CORE_ALPHA * pow(max(0.0, 1.0 - (t - 0.2) / 0.8), 1.35)
+                alpha = AMBIENT_BSM_CORE_ALPHA * pow(max(0.0, 1.0 - (t - 0.25) / 0.75), 0.9)
             if alpha <= 0.0:
                 continue
             x = index * step_w if side == "left" else DESIGN_WIDTH - (index + 1) * step_w
@@ -2523,7 +2525,11 @@ class ClusterUiRenderer:
             )
 
     def _draw_ambient_power_meter(self, state: ClusterUiState) -> None:
-        direction, amount = ambient_power_gauge(state.accel_mps2)
+        now = time.monotonic()
+        elapsed = 1.0 / 30.0 if self._ambient_accel_updated_at is None else now - self._ambient_accel_updated_at
+        self._ambient_accel_updated_at = now
+        self._ambient_accel_display = smooth_ambient_accel(self._ambient_accel_display, state.accel_mps2, elapsed)
+        direction, amount = ambient_power_gauge(self._ambient_accel_display)
         fill_y = AMBIENT_POWER_FILL_Y
         fill_h = AMBIENT_POWER_FILL_H
         mid_y = fill_y + fill_h * 0.5 + AMBIENT_POWER_HANDLE_H * 0.5
@@ -2697,13 +2703,17 @@ class ClusterUiRenderer:
     def _draw_ambient_lfa_icon(self, state: ClusterUiState) -> None:
         active = bool(state.lfa_active)
         tint = AMBIENT_LFA_ACTIVE_COLOR if active else AMBIENT_LFA_INACTIVE_COLOR
-        if active:
-            self._draw_ambient_lfa_shape(tint, 255)
-            return
         if self._ambient_lane_assist_icon_texture is not None and self._ambient_lane_assist_icon_texture.width > 0:
             source = rl.Rectangle(0.0, 0.0, float(self._ambient_lane_assist_icon_texture.width), float(self._ambient_lane_assist_icon_texture.height))
             dest = rl.Rectangle(AMBIENT_LFA_CENTER_X - 36.0, AMBIENT_TOP_ROW_Y - 23.0, 72.0, 46.0)
-            rl.draw_texture_pro(self._ambient_lane_assist_icon_texture, source, dest, rl.Vector2(0.0, 0.0), 0.0, rl_color(tint, 130))
+            rl.draw_texture_pro(
+                self._ambient_lane_assist_icon_texture,
+                source,
+                dest,
+                rl.Vector2(0.0, 0.0),
+                0.0,
+                rl_color(tint, 255 if active else 130),
+            )
             return
         texture = self._lfa_active_texture if active and self._lfa_active_texture is not None else self._lfa_texture
         if texture is not None and texture.width > 0 and texture.height > 0:
