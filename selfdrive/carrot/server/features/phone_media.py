@@ -56,6 +56,7 @@ def _normalize_phone_media(body: dict[str, Any]) -> dict[str, Any]:
     "artBase64": art_base64,
     "artMime": _safe_text(body, "artMime", 80),
     "artHash": _safe_text(body, "artHash", 160),
+    "artSource": _safe_text(body, "artSource", 160),
     "updatedAtMs": _safe_int(body.get("updatedAtMs")) or now_ms,
     "receivedAtMs": now_ms,
   }
