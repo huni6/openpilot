@@ -1,6 +1,6 @@
 import math
 
-from selfdrive.carrot.cluster.cluster_layout import ambient_power_gauge, ambient_bsm_edges, smooth_ambient_accel
+from selfdrive.carrot.cluster.cluster_layout import ambient_power_gauge, ambient_bsm_edges, extrapolated_media_position_ms, smooth_ambient_accel
 
 
 def test_ambient_power_gauge_maps_accel_to_signed_fill():
@@ -22,3 +22,10 @@ def test_ambient_bsm_edges_keeps_left_and_right_independent():
   assert ambient_bsm_edges(False, False) == (False, False)
   assert ambient_bsm_edges(True, False) == (True, False)
   assert ambient_bsm_edges(False, True) == (False, True)
+
+
+def test_extrapolated_media_position_advances_only_while_playing():
+  assert extrapolated_media_position_ms(10_000, 60_000, True, 100_000, 102_500) == 12_500
+  assert extrapolated_media_position_ms(10_000, 60_000, False, 100_000, 102_500) == 10_000
+  assert extrapolated_media_position_ms(59_000, 60_000, True, 100_000, 102_500) == 60_000
+  assert extrapolated_media_position_ms(None, 60_000, True, 100_000, 102_500) is None

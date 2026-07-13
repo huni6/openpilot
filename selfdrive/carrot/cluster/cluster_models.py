@@ -127,6 +127,7 @@ class PhoneMediaInfo:
     art_mime: str = ""
     art_hash: str = ""
     updated_at_ms: int | None = None
+    received_at_ms: int | None = None
 
 
 @dataclass(frozen=True, slots=True)

@@ -378,6 +378,7 @@ class OpenpilotLiveSource:
             art_mime=text_value("artMime", 64),
             art_hash=text_value("artHash", 128),
             updated_at_ms=int_value("updatedAtMs"),
+            received_at_ms=int_value("receivedAtMs"),
         )
         self._phone_media_cache = media
         return media

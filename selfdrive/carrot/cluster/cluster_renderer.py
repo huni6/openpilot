@@ -56,7 +56,7 @@ from cluster_models import (
     PhoneMediaInfo,
     RouteOverlay,
 )
-from cluster_layout import ambient_bsm_edges, ambient_power_gauge, smooth_ambient_accel
+from cluster_layout import ambient_bsm_edges, ambient_power_gauge, extrapolated_media_position_ms, smooth_ambient_accel
 from cluster_scene import (
     ClusterScene,
     MeshStrip,
@@ -2957,8 +2957,15 @@ class ClusterUiRenderer:
             else:
                 self._draw_text("Paused", PHONE_MEDIA_TEXT_X, PHONE_MEDIA_ARTIST_Y, PHONE_MEDIA_ARTIST_SIZE, theme.muted)
 
-        if media.duration_ms is not None and media.duration_ms > 0 and media.position_ms is not None:
-            progress = clamp(media.position_ms / max(1.0, float(media.duration_ms)), 0.0, 1.0)
+        position_ms = extrapolated_media_position_ms(
+            media.position_ms,
+            media.duration_ms,
+            media.is_playing,
+            media.received_at_ms,
+            int(time.time() * 1000.0),
+        )
+        if media.duration_ms is not None and media.duration_ms > 0 and position_ms is not None:
+            progress = clamp(position_ms / max(1.0, float(media.duration_ms)), 0.0, 1.0)
             bg_rect = rl.Rectangle(PHONE_MEDIA_X, PHONE_MEDIA_PROGRESS_Y, PHONE_MEDIA_W, PHONE_MEDIA_PROGRESS_H)
             fg_rect = rl.Rectangle(PHONE_MEDIA_X, PHONE_MEDIA_PROGRESS_Y, PHONE_MEDIA_W * progress, PHONE_MEDIA_PROGRESS_H)
             bg_color = (255, 255, 255, 26) if ambient else (*theme.faint, 120)
@@ -2970,11 +2977,11 @@ class ClusterUiRenderer:
                 thumb_y = PHONE_MEDIA_PROGRESS_Y + PHONE_MEDIA_PROGRESS_H * 0.5
                 rl.draw_circle_v(rl.Vector2(thumb_x, thumb_y), 7.0, rl_color(WHITE))
                 time_y = PHONE_MEDIA_PROGRESS_Y + 25.5
-                self._draw_ambient_text(format_duration_ms(media.position_ms), PHONE_MEDIA_X, time_y, PHONE_MEDIA_TIME_SIZE, (156, 163, 175), weight="regular")
+                self._draw_ambient_text(format_duration_ms(position_ms), PHONE_MEDIA_X, time_y, PHONE_MEDIA_TIME_SIZE, (156, 163, 175), weight="regular")
                 self._draw_ambient_text(format_duration_ms(media.duration_ms), PHONE_MEDIA_X + PHONE_MEDIA_W, time_y, PHONE_MEDIA_TIME_SIZE, (156, 163, 175), weight="regular", anchor="right")
             else:
                 time_y = PHONE_MEDIA_PROGRESS_Y + 22.0
-                self._draw_text(format_duration_ms(media.position_ms), PHONE_MEDIA_X, time_y, PHONE_MEDIA_TIME_SIZE, theme.muted)
+                self._draw_text(format_duration_ms(position_ms), PHONE_MEDIA_X, time_y, PHONE_MEDIA_TIME_SIZE, theme.muted)
                 self._draw_text(format_duration_ms(media.duration_ms), PHONE_MEDIA_X + PHONE_MEDIA_W, time_y, PHONE_MEDIA_TIME_SIZE, theme.muted, anchor="right")
         return True
 

@@ -37,5 +37,22 @@ def smooth_ambient_accel(previous: float, accel_mps2: float | int | None, elapse
   return 0.0 if target == 0.0 and abs(value) < 0.01 else value
 
 
+def extrapolated_media_position_ms(
+  position_ms: int | None,
+  duration_ms: int | None,
+  is_playing: bool,
+  received_at_ms: int | None,
+  now_ms: int,
+) -> int | None:
+  if position_ms is None or position_ms < 0:
+    return None
+  position = int(position_ms)
+  if is_playing and received_at_ms is not None and now_ms > received_at_ms:
+    position += now_ms - received_at_ms
+  if duration_ms is not None and duration_ms >= 0:
+    position = min(position, int(duration_ms))
+  return max(0, position)
+
+
 def ambient_bsm_edges(left_blindspot: bool, right_blindspot: bool) -> tuple[bool, bool]:
   return bool(left_blindspot), bool(right_blindspot)
