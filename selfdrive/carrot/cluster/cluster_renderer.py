@@ -254,6 +254,7 @@ PHONE_MEDIA_TITLE_SIZE = 49.0
 PHONE_MEDIA_ARTIST_SIZE = 30.0
 PHONE_MEDIA_TIME_SIZE = 15.0
 PHONE_MEDIA_PROGRESS_H = 4.0
+PHONE_MEDIA_UNICODE_FONT_BASE_SIZE = 160
 RADAR_LABEL_DISTANCE_FONT_SIZE = 16
 RADAR_LABEL_SPEED_FONT_SIZE = 14
 VEHICLE_BADGE_DISTANCE_FONT_SIZE = 17
@@ -650,6 +651,8 @@ class ClusterUiRenderer:
         self._phone_media_art_texture = None
         self._phone_media_art_hash = ""
         self._phone_media_art_size: tuple[int, int] | None = None
+        self._phone_media_unicode_font = None
+        self._phone_media_unicode_codepoints: tuple[int, ...] = ()
         self._ambient_reference_texture = None
         self._ambient_reference_texture_path = ""
         self._ambient_render_error_logged = False
@@ -852,6 +855,10 @@ class ClusterUiRenderer:
             self._phone_media_art_texture = None
             self._phone_media_art_hash = ""
             self._phone_media_art_size = None
+        if self._phone_media_unicode_font is not None:
+            rl.unload_font(self._phone_media_unicode_font)
+            self._phone_media_unicode_font = None
+            self._phone_media_unicode_codepoints = ()
         if self._ambient_reference_texture is not None:
             rl.unload_texture(self._ambient_reference_texture)
             self._ambient_reference_texture = None
@@ -1496,6 +1503,55 @@ class ClusterUiRenderer:
 
     def _ambient_font(self, weight: str):
         return self._ambient_fonts.get(weight) or self._font or rl.get_font_default()
+
+    @staticmethod
+    def _phone_media_codepoints(text: str) -> tuple[int, ...]:
+        codepoints = {
+            ord(char)
+            for char in text
+            if ord(char) >= 32 and not 0xD800 <= ord(char) <= 0xDFFF
+        }
+        if not any(codepoint > 126 for codepoint in codepoints):
+            return ()
+        codepoints.update((ord(" "), ord("."), ord("?")))
+        return tuple(sorted(codepoints))
+
+    def _phone_media_font_for(self, text: str):
+        codepoints = self._phone_media_codepoints(text)
+        if not codepoints:
+            if self._phone_media_unicode_font is not None:
+                rl.unload_font(self._phone_media_unicode_font)
+                self._phone_media_unicode_font = None
+                self._phone_media_unicode_codepoints = ()
+            return None
+        if codepoints == self._phone_media_unicode_codepoints:
+            return self._phone_media_unicode_font
+        if self._phone_media_unicode_font is not None:
+            rl.unload_font(self._phone_media_unicode_font)
+            self._phone_media_unicode_font = None
+            self._phone_media_unicode_codepoints = ()
+        if not KAIGEN_GOTHIC_KR_BOLD_FONT_PATH.exists():
+            self._phone_media_unicode_codepoints = codepoints
+            return None
+        try:
+            codepoint_array = rl.ffi.new("int[]", codepoints)
+            font = rl.load_font_ex(
+                str(KAIGEN_GOTHIC_KR_BOLD_FONT_PATH),
+                PHONE_MEDIA_UNICODE_FONT_BASE_SIZE,
+                rl.ffi.cast("int *", codepoint_array),
+                len(codepoints),
+            )
+            if font.texture.id <= 0:
+                self._phone_media_unicode_codepoints = codepoints
+                return None
+            rl.set_texture_filter(font.texture, rl.TextureFilter.TEXTURE_FILTER_BILINEAR)
+            self._phone_media_unicode_font = font
+            self._phone_media_unicode_codepoints = codepoints
+            return font
+        except Exception as exc:
+            self._phone_media_unicode_codepoints = codepoints
+            print(f"Phone media Unicode font load failed: {exc}")
+            return None
 
     def _font_candidates(self) -> list[Path]:
         return [
@@ -2917,16 +2973,27 @@ class ClusterUiRenderer:
                 self._phone_media_art_texture = None
                 self._phone_media_art_hash = ""
                 self._phone_media_art_size = None
+            if self._phone_media_unicode_font is not None:
+                rl.unload_font(self._phone_media_unicode_font)
+                self._phone_media_unicode_font = None
+                self._phone_media_unicode_codepoints = ()
             return False
 
         theme = current_cluster_theme("dark") if ambient else self._current_theme()
         text_w = PHONE_MEDIA_W - PHONE_MEDIA_ART_SIZE - 24.0
+        media_font = self._phone_media_font_for(
+            f"{media.title or 'Now playing'}\n{media.artist or ('Paused' if not media.is_playing else '')}"
+        )
         if ambient:
-            title = self._ellipsize_ambient_text(media.title or "Now playing", PHONE_MEDIA_TITLE_SIZE, text_w, "semibold")
-            artist = self._ellipsize_ambient_text(media.artist or "", PHONE_MEDIA_ARTIST_SIZE, text_w, "regular")
+            title = self._ellipsize_ambient_text(
+                media.title or "Now playing", PHONE_MEDIA_TITLE_SIZE, text_w, "semibold", media_font
+            )
+            artist = self._ellipsize_ambient_text(
+                media.artist or "", PHONE_MEDIA_ARTIST_SIZE, text_w, "regular", media_font
+            )
         else:
-            title = self._ellipsize_text(media.title or "Now playing", PHONE_MEDIA_TITLE_SIZE, text_w)
-            artist = self._ellipsize_text(media.artist or "", PHONE_MEDIA_ARTIST_SIZE, text_w)
+            title = self._ellipsize_text(media.title or "Now playing", PHONE_MEDIA_TITLE_SIZE, text_w, media_font)
+            artist = self._ellipsize_text(media.artist or "", PHONE_MEDIA_ARTIST_SIZE, text_w, media_font)
         texture = self._phone_media_art_texture_for(media)
 
         if texture is not None and texture.width > 0 and texture.height > 0:
@@ -2943,14 +3010,26 @@ class ClusterUiRenderer:
             self._rounded_rect(PHONE_MEDIA_X, PHONE_MEDIA_Y, PHONE_MEDIA_ART_SIZE, PHONE_MEDIA_ART_SIZE, 18.0, theme.panel_bg, theme.faint, 2.0)
 
         if ambient:
-            self._draw_ambient_text(title, PHONE_MEDIA_TEXT_X, PHONE_MEDIA_TITLE_Y, PHONE_MEDIA_TITLE_SIZE, WHITE, weight="semibold")
+            self._draw_ambient_text(
+                title, PHONE_MEDIA_TEXT_X, PHONE_MEDIA_TITLE_Y, PHONE_MEDIA_TITLE_SIZE, WHITE,
+                weight="semibold", font_override=media_font,
+            )
         else:
-            self._draw_text(title, PHONE_MEDIA_TEXT_X, PHONE_MEDIA_TITLE_Y, PHONE_MEDIA_TITLE_SIZE, theme.text)
+            self._draw_text(
+                title, PHONE_MEDIA_TEXT_X, PHONE_MEDIA_TITLE_Y, PHONE_MEDIA_TITLE_SIZE, theme.text,
+                font_override=media_font,
+            )
         if artist:
             if ambient:
-                self._draw_ambient_text(artist, PHONE_MEDIA_TEXT_X, PHONE_MEDIA_ARTIST_Y, PHONE_MEDIA_ARTIST_SIZE, (209, 213, 219), weight="regular")
+                self._draw_ambient_text(
+                    artist, PHONE_MEDIA_TEXT_X, PHONE_MEDIA_ARTIST_Y, PHONE_MEDIA_ARTIST_SIZE, (209, 213, 219),
+                    weight="regular", font_override=media_font,
+                )
             else:
-                self._draw_text(artist, PHONE_MEDIA_TEXT_X, PHONE_MEDIA_ARTIST_Y, PHONE_MEDIA_ARTIST_SIZE, theme.muted)
+                self._draw_text(
+                    artist, PHONE_MEDIA_TEXT_X, PHONE_MEDIA_ARTIST_Y, PHONE_MEDIA_ARTIST_SIZE, theme.muted,
+                    font_override=media_font,
+                )
         elif not media.is_playing:
             if ambient:
                 self._draw_ambient_text("Paused", PHONE_MEDIA_TEXT_X, PHONE_MEDIA_ARTIST_Y, PHONE_MEDIA_ARTIST_SIZE, (209, 213, 219), weight="regular")
@@ -4352,9 +4431,11 @@ class ClusterUiRenderer:
         size: float,
         color: tuple[int, int, int],
         anchor: str = "left",
+        font_override=None,
     ) -> None:
         spacing = max(1.0, size * 0.02)
-        text_width, text_height = self._measure_text(text, size, spacing)
+        font = font_override or self._font or rl.get_font_default()
+        text_width, text_height = self._measure_text_with_font(font, text, size, spacing)
         draw_x = x
         draw_y = y
         if anchor == "center":
@@ -4365,7 +4446,7 @@ class ClusterUiRenderer:
         elif anchor == "right":
             draw_x = x - text_width
             draw_y = y - text_height * 0.5
-        rl.draw_text_ex(self._font, text, rl.Vector2(draw_x, draw_y), size, spacing, rl_color(color))
+        rl.draw_text_ex(font, text, rl.Vector2(draw_x, draw_y), size, spacing, rl_color(color))
 
     def _draw_plain_text(
         self,
@@ -4426,9 +4507,10 @@ class ClusterUiRenderer:
         weight: str = "regular",
         anchor: str = "left",
         spacing: float = 0.0,
+        font_override=None,
     ) -> None:
         try:
-            font = self._ambient_font(weight)
+            font = font_override or self._ambient_font(weight)
             text_width, text_height = self._measure_text_with_font(font, text, size, spacing)
             draw_x = x
             draw_y = y
@@ -4611,9 +4693,10 @@ class ClusterUiRenderer:
         self._text_measure_cache[key] = measured
         return measured
 
-    def _ellipsize_text(self, text: str, size: float, max_width: float) -> str:
+    def _ellipsize_text(self, text: str, size: float, max_width: float, font_override=None) -> str:
         spacing = max(1.0, size * 0.02)
-        if self._measure_text(text, size, spacing)[0] <= max_width:
+        font = font_override or self._font or rl.get_font_default()
+        if self._measure_text_with_font(font, text, size, spacing)[0] <= max_width:
             return text
         ellipsis = "..."
         low = 0
@@ -4621,14 +4704,14 @@ class ClusterUiRenderer:
         while low < high:
             mid = (low + high + 1) // 2
             candidate = text[:mid] + ellipsis
-            if self._measure_text(candidate, size, spacing)[0] <= max_width:
+            if self._measure_text_with_font(font, candidate, size, spacing)[0] <= max_width:
                 low = mid
             else:
                 high = mid - 1
         return text[:low] + ellipsis
 
-    def _ellipsize_ambient_text(self, text: str, size: float, max_width: float, weight: str) -> str:
-        font = self._ambient_font(weight)
+    def _ellipsize_ambient_text(self, text: str, size: float, max_width: float, weight: str, font_override=None) -> str:
+        font = font_override or self._ambient_font(weight)
         spacing = 0.0
         if self._measure_text_with_font(font, text, size, spacing)[0] <= max_width:
             return text
