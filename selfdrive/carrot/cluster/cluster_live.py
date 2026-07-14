@@ -312,17 +312,18 @@ class OpenpilotLiveSource:
             return self._phone_media_cache
         self._phone_media_last_read_t = now
 
-        selected_path: Path | None = None
+        candidates: list[tuple[float, Path]] = []
         for path in self._phone_media_paths:
             try:
                 if path.is_file():
-                    selected_path = path
-                    break
+                    candidates.append((path.stat().st_mtime, path))
             except OSError:
                 continue
-        if selected_path is None:
+        if not candidates:
             self._phone_media_cache = None
             return None
+
+        _, selected_path = max(candidates, key=lambda candidate: candidate[0])
 
         try:
             stat = selected_path.stat()

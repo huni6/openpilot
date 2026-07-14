@@ -9,6 +9,7 @@ from aiohttp import web
 
 from ..config import (
   PHONE_MEDIA_ART_BASE64_MAX_CHARS,
+  PHONE_MEDIA_FALLBACK_PATH,
   PHONE_MEDIA_PATH,
   PHONE_MEDIA_TEXT_MAX_CHARS,
 )
@@ -72,13 +73,41 @@ def _write_json_atomic(path: str, data: dict[str, Any]) -> None:
   os.replace(tmp_path, path)
 
 
+def _write_phone_media(data: dict[str, Any]) -> str:
+  primary_error: Exception | None = None
+  try:
+    _write_json_atomic(PHONE_MEDIA_PATH, data)
+    return PHONE_MEDIA_PATH
+  except Exception as exc:
+    primary_error = exc
+
+  try:
+    _write_json_atomic(PHONE_MEDIA_FALLBACK_PATH, data)
+    return PHONE_MEDIA_FALLBACK_PATH
+  except Exception as fallback_error:
+    raise OSError(
+      f"phone media write failed: primary={primary_error}; fallback={fallback_error}"
+    ) from fallback_error
+
+
+def _latest_phone_media_path() -> str:
+  candidates: list[tuple[float, str]] = []
+  for path in (PHONE_MEDIA_PATH, PHONE_MEDIA_FALLBACK_PATH):
+    try:
+      candidates.append((os.path.getmtime(path), path))
+    except OSError:
+      continue
+  return max(candidates, default=(0.0, PHONE_MEDIA_PATH))[1]
+
+
 async def health(request: web.Request) -> web.Response:
   return web.json_response({"ok": True, "phoneMedia": True})
 
 
 async def get_phone_media(request: web.Request) -> web.Response:
+  path = _latest_phone_media_path()
   try:
-    with open(PHONE_MEDIA_PATH, "r", encoding="utf-8") as f:
+    with open(path, "r", encoding="utf-8") as f:
       media = json.load(f)
   except FileNotFoundError:
     media = {}
@@ -96,10 +125,10 @@ async def set_phone_media(request: web.Request) -> web.Response:
     return web.json_response({"ok": False, "error": "invalid body"}, status=400)
   media = _normalize_phone_media(body)
   try:
-    _write_json_atomic(PHONE_MEDIA_PATH, media)
+    path = _write_phone_media(media)
   except Exception as exc:
     return web.json_response({"ok": False, "error": str(exc)}, status=500)
-  return web.json_response({"ok": True, "path": PHONE_MEDIA_PATH})
+  return web.json_response({"ok": True, "path": path})
 
 
 def register(app: web.Application) -> None:
