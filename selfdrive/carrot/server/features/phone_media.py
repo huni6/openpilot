@@ -46,7 +46,7 @@ def _normalize_phone_media(body: dict[str, Any]) -> dict[str, Any]:
   art_base64 = _safe_text(body, "artBase64", PHONE_MEDIA_ART_BASE64_MAX_CHARS + 1)
   if len(art_base64) > PHONE_MEDIA_ART_BASE64_MAX_CHARS:
     art_base64 = ""
-  now_ms = int(time.time() * 1000.0)
+  now_ms = int(time.time() * 1000.0)  # noqa: TID251 - protocol uses Unix epoch milliseconds
   return {
     "title": _safe_text(body, "title"),
     "artist": _safe_text(body, "artist"),
@@ -100,15 +100,43 @@ def _latest_phone_media_path() -> str:
   return max(candidates, default=(0.0, PHONE_MEDIA_PATH))[1]
 
 
+def _read_latest_phone_media() -> dict[str, Any]:
+  with open(_latest_phone_media_path(), encoding="utf-8") as f:
+    media = json.load(f)
+  return media if isinstance(media, dict) else {}
+
+
+def _same_media_item(left: dict[str, Any], right: dict[str, Any]) -> bool:
+  left_title = str(left.get("title") or "").strip().casefold()
+  right_title = str(right.get("title") or "").strip().casefold()
+  if not left_title or left_title != right_title:
+    return False
+
+  left_artist = str(left.get("artist") or "").strip().casefold()
+  right_artist = str(right.get("artist") or "").strip().casefold()
+  if left_artist and right_artist and left_artist != right_artist:
+    return False
+
+  left_package = str(left.get("package") or "").strip().casefold()
+  right_package = str(right.get("package") or "").strip().casefold()
+  return not (left_package and right_package) or left_package == right_package
+
+
+def _preserve_phone_media_art(media: dict[str, Any], previous: dict[str, Any]) -> bool:
+  if media.get("artBase64") or not previous.get("artBase64") or not _same_media_item(media, previous):
+    return False
+  for key in ("artBase64", "artMime", "artHash", "artSource"):
+    media[key] = previous.get(key, "")
+  return True
+
+
 async def health(request: web.Request) -> web.Response:
   return web.json_response({"ok": True, "phoneMedia": True})
 
 
 async def get_phone_media(request: web.Request) -> web.Response:
-  path = _latest_phone_media_path()
   try:
-    with open(path, "r", encoding="utf-8") as f:
-      media = json.load(f)
+    media = _read_latest_phone_media()
   except FileNotFoundError:
     media = {}
   except Exception as exc:
@@ -125,10 +153,20 @@ async def set_phone_media(request: web.Request) -> web.Response:
     return web.json_response({"ok": False, "error": "invalid body"}, status=400)
   media = _normalize_phone_media(body)
   try:
+    previous = _read_latest_phone_media()
+  except Exception:
+    previous = {}
+  art_preserved = _preserve_phone_media_art(media, previous)
+  try:
     path = _write_phone_media(media)
   except Exception as exc:
     return web.json_response({"ok": False, "error": str(exc)}, status=500)
-  return web.json_response({"ok": True, "path": path})
+  return web.json_response({
+    "ok": True,
+    "path": path,
+    "artChars": len(media["artBase64"]),
+    "artPreserved": art_preserved,
+  })
 
 
 def register(app: web.Application) -> None:
