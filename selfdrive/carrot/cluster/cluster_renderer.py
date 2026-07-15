@@ -152,10 +152,9 @@ AMBIENT_POWER_HANDLE_W = 40.0
 AMBIENT_POWER_HANDLE_H = 6.0
 AMBIENT_TOP_ROW_Y = 92.5
 AMBIENT_SPEED_LIMIT_CENTER_X = 666.0
-AMBIENT_SPEED_LIMIT_RADIUS = 30.0
-AMBIENT_SPEED_LIMIT_INNER_RADIUS = 24.0
-AMBIENT_SPEED_LIMIT_TEXT_SIZE = 27.0
-AMBIENT_SPEED_LIMIT_SOURCE_SIZE = 10.0
+AMBIENT_SPEED_LIMIT_RADIUS = 36.0
+AMBIENT_SPEED_LIMIT_INNER_RADIUS = 29.0
+AMBIENT_SPEED_LIMIT_TEXT_SIZE = 32.0
 AMBIENT_GEAR_X = 760.8
 AMBIENT_GEAR_SIZE = 52.0
 AMBIENT_DIVIDER_H = 42.0
@@ -171,8 +170,8 @@ AMBIENT_GAP_Y = 142.0
 AMBIENT_GAP_BAR_W = 30.0
 AMBIENT_GAP_BAR_H = 12.0
 AMBIENT_GAP_BAR_GAP = 10.0
-AMBIENT_CLOCK_RIGHT_X = 1890.0
-AMBIENT_CLOCK_Y = 85.5
+AMBIENT_CLOCK_RIGHT_X = 1845.0
+AMBIENT_CLOCK_Y = 62.5
 AMBIENT_CLOCK_SIZE = 50.0
 AMBIENT_BSM_W = 300.0
 AMBIENT_BSM_COLOR = (204, 88, 0)
@@ -184,19 +183,6 @@ AMBIENT_TEXT_EDGE_BOOST_ALPHA = int(os.environ.get("CLUSTER_AMBIENT_TEXT_EDGE_BO
 SPEED_LIMIT_SIGN_CENTER_X = 460
 SPEED_LIMIT_SIGN_CENTER_Y = TURN_SIGNAL_CENTER_Y
 SPEED_LIMIT_SIGN_RADIUS = 56.0
-SPEED_LIMIT_SOURCE_LABELS = {
-    "vehicle": "v",
-    "car": "v",
-    "v": "v",
-    "nav": "n",
-    "navigation": "n",
-    "n": "n",
-    "model": "m",
-    "m": "m",
-    "vision": "vis",
-    "vis": "vis",
-    "sim": "sim",
-}
 SYSTEM_PANEL_X = 1416
 SYSTEM_PANEL_Y = 118
 SYSTEM_PANEL_W = 476
@@ -569,15 +555,6 @@ def vehicle_source_is_front_radar(source: str) -> bool:
 
 def vehicle_source_is_radar_track(source: str) -> bool:
     return source in ("radarPoint", "liveTracks") or "+radar:" in source
-
-
-def speed_limit_source_label(source: str | None) -> str:
-    if source is None:
-        return ""
-    normalized = source.strip().lower()
-    if not normalized:
-        return ""
-    return SPEED_LIMIT_SOURCE_LABELS.get(normalized, normalized[:3])
 
 
 def world_label_scale(distance_m: float) -> float:
@@ -2745,23 +2722,12 @@ class ClusterUiRenderer:
         self._draw_ambient_text(
             limit_text,
             AMBIENT_SPEED_LIMIT_CENTER_X,
-            AMBIENT_TOP_ROW_Y - 4.0,
+            AMBIENT_TOP_ROW_Y,
             AMBIENT_SPEED_LIMIT_TEXT_SIZE,
             TEXT,
             weight="medium",
             anchor="center",
         )
-        source_label = speed_limit_source_label(state.speed_limit_source) if state.speed_limit_kph is not None else ""
-        if source_label:
-            self._draw_ambient_text(
-                source_label,
-                AMBIENT_SPEED_LIMIT_CENTER_X,
-                AMBIENT_TOP_ROW_Y + 17.0,
-                AMBIENT_SPEED_LIMIT_SOURCE_SIZE,
-                TEXT,
-                weight="regular",
-                anchor="center",
-            )
 
     def _draw_ambient_divider(self, x: float) -> None:
         y0 = AMBIENT_TOP_ROW_Y - AMBIENT_DIVIDER_H * 0.5
@@ -4278,21 +4244,11 @@ class ClusterUiRenderer:
             self._draw_text(
                 limit_text,
                 SPEED_LIMIT_SIGN_CENTER_X,
-                SPEED_LIMIT_SIGN_CENTER_Y - 12,
+                SPEED_LIMIT_SIGN_CENTER_Y,
                 42,
                 TEXT,
                 anchor="center",
             )
-            source_label = speed_limit_source_label(state.speed_limit_source) if state.speed_limit_kph is not None else ""
-            if source_label:
-                self._draw_text(
-                    source_label,
-                    SPEED_LIMIT_SIGN_CENTER_X,
-                    SPEED_LIMIT_SIGN_CENTER_Y + 31,
-                    17,
-                    TEXT,
-                    anchor="center",
-                )
 
     @staticmethod
     def _cruise_set_visible(state: ClusterUiState) -> bool:
