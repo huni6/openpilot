@@ -696,7 +696,6 @@ class ClusterUiRenderer:
         self._phone_media_art_hash = ""
         self._phone_media_art_size: tuple[int, int] | None = None
         self._phone_media_art_failed_hash = ""
-        self._phone_media_art_failure_stage = ""
         self._phone_media_art_failures_logged: set[str] = set()
         self._phone_media_unicode_font = None
         self._phone_media_unicode_codepoints: tuple[int, ...] = ()
@@ -903,7 +902,6 @@ class ClusterUiRenderer:
             self._phone_media_art_hash = ""
             self._phone_media_art_size = None
         self._phone_media_art_failed_hash = ""
-        self._phone_media_art_failure_stage = ""
         self._phone_media_art_failures_logged.clear()
         if self._phone_media_unicode_font is not None:
             rl.unload_font(self._phone_media_unicode_font)
@@ -2524,7 +2522,6 @@ class ClusterUiRenderer:
             self._draw_ambient_step("drive_status", lambda: self._draw_ambient_drive_status(state))
             self._draw_ambient_step("clock", lambda: self._draw_ambient_clock(state))
             self._draw_ambient_step("phone_media", lambda: self._draw_phone_media_panel(state.phone_media, ambient=True))
-            self._draw_ambient_step("phone_media_debug", lambda: self._draw_phone_media_debug(state.phone_media))
             self._draw_ambient_step("bsm_edges", lambda: self._draw_ambient_bsm_edges(state))
         finally:
             rl.rl_pop_matrix()
@@ -3127,7 +3124,6 @@ class ClusterUiRenderer:
                 self._phone_media_art_hash = ""
                 self._phone_media_art_size = None
             self._phone_media_art_failed_hash = ""
-            self._phone_media_art_failure_stage = ""
             return None
         if self._phone_media_art_texture is not None and art_hash == self._phone_media_art_hash:
             return self._phone_media_art_texture
@@ -3165,7 +3161,6 @@ class ClusterUiRenderer:
             self._phone_media_art_hash = art_hash
             self._phone_media_art_size = (int(texture.width), int(texture.height))
             self._phone_media_art_failed_hash = ""
-            self._phone_media_art_failure_stage = ""
             return self._phone_media_art_texture
         except Exception as exc:
             self._phone_media_art_failed(art_hash, "image-process", len(art_base64), image_bytes, media, exc)
@@ -3210,7 +3205,6 @@ class ClusterUiRenderer:
         exc: Exception | None = None,
     ) -> None:
         self._phone_media_art_failed_hash = art_hash
-        self._phone_media_art_failure_stage = stage
         log_key = f"{art_hash}:{stage}"
         if log_key in self._phone_media_art_failures_logged:
             return
@@ -3225,66 +3219,6 @@ class ClusterUiRenderer:
             f"magic={image_bytes[:12].hex()} mime={mime!r} source={source!r}",
         ))
         self._append_ambient_diag(detail, exc)
-
-    def _draw_phone_media_debug(self, media: PhoneMediaInfo | None) -> None:
-        center_x = DESIGN_WIDTH * 0.5
-        if media is None:
-            status = "no-media-data"
-            input_chars = 0
-            stored_chars = 0
-            decoded_bytes = 0
-            image_format = "none"
-            mime = "-"
-            source = "-"
-            render_status = "NO DATA"
-        else:
-            status = media.art_status or ("received" if media.art_base64 else "missing")
-            input_chars = media.art_input_chars if media.art_input_chars is not None else len(media.art_base64)
-            stored_chars = len(media.art_base64)
-            decoded_bytes = media.art_bytes or 0
-            image_format = media.art_format or "unknown"
-            mime = media.art_mime or "-"
-            source = media.art_source or "-"
-            if self._phone_media_art_texture is not None and self._is_texture_valid(self._phone_media_art_texture):
-                render_status = f"OK {self._phone_media_art_texture.width}x{self._phone_media_art_texture.height}"
-            elif self._phone_media_art_failure_stage:
-                render_status = f"FAILED {self._phone_media_art_failure_stage}"
-            elif not media.art_base64:
-                render_status = "NO ART"
-            else:
-                render_status = "PENDING"
-
-        success = status in ("ok", "preserved", "received") and render_status.startswith("OK")
-        failed = status.startswith("invalid-") or status in ("dropped-too-large", "unknown-image-format") or render_status.startswith("FAILED")
-        status_color = (34, 197, 94) if success else (248, 113, 113) if failed else (251, 191, 36)
-        self._draw_ambient_text("ALBUM ART DEBUG", center_x, 216.0, 34.0, status_color, weight="semibold", anchor="center")
-        self._draw_ambient_text(
-            f"STATUS {status.upper()}  |  RENDER {render_status}",
-            center_x,
-            260.0,
-            27.0,
-            (229, 231, 235),
-            weight="regular",
-            anchor="center",
-        )
-        self._draw_ambient_text(
-            f"INPUT {input_chars}  |  STORED {stored_chars}  |  DECODED {decoded_bytes} B  |  FORMAT {image_format.upper()}",
-            center_x,
-            302.0,
-            22.0,
-            (156, 163, 175),
-            weight="regular",
-            anchor="center",
-        )
-        self._draw_ambient_text(
-            f"MIME {mime}  |  SOURCE {source}",
-            center_x,
-            338.0,
-            20.0,
-            (129, 140, 158),
-            weight="regular",
-            anchor="center",
-        )
 
     @staticmethod
     def _apply_rounded_image_alpha(image, radius_px: int) -> None:
