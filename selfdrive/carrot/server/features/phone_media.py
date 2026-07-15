@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 import os
 import time
@@ -61,6 +63,73 @@ def _normalize_phone_media(body: dict[str, Any]) -> dict[str, Any]:
     "updatedAtMs": _safe_int(body.get("updatedAtMs")) or now_ms,
     "receivedAtMs": now_ms,
   }
+
+
+def _art_input_chars(body: dict[str, Any]) -> int:
+  value = body.get("artBase64")
+  return len(str(value).strip()) if value is not None else 0
+
+
+def _decode_art_base64(value: str) -> tuple[bytes, str]:
+  if not value:
+    return b"", "missing"
+  payload = value.split(",", 1)[1] if "," in value[:96] else value
+  compact = "".join(payload.split())
+  if not compact:
+    return b"", "missing"
+  compact += "=" * (-len(compact) % 4)
+  try:
+    decoded = base64.b64decode(compact, altchars=b"-_", validate=True)
+  except (binascii.Error, ValueError, UnicodeEncodeError) as exc:
+    return b"", f"invalid-base64:{type(exc).__name__}"
+  return decoded, "" if decoded else "decoded-empty"
+
+
+def _image_format(data: bytes) -> str:
+  if data.startswith(b"\xff\xd8\xff"):
+    return "jpeg"
+  if data.startswith(b"\x89PNG\r\n\x1a\n"):
+    return "png"
+  if data.startswith((b"GIF87a", b"GIF89a")):
+    return "gif"
+  if data.startswith(b"BM"):
+    return "bmp"
+  if len(data) >= 12 and data.startswith(b"RIFF") and data[8:12] == b"WEBP":
+    return "webp"
+  return "unknown"
+
+
+def _art_diagnostics(media: dict[str, Any], input_chars: int | None = None) -> dict[str, Any]:
+  art_base64 = str(media.get("artBase64") or "")
+  decoded, decode_error = _decode_art_base64(art_base64)
+  image_format = _image_format(decoded) if decoded else "none"
+  if decode_error:
+    status = decode_error
+  elif image_format == "unknown":
+    status = "unknown-image-format"
+  else:
+    status = "ok"
+  return {
+    "artInputChars": len(art_base64) if input_chars is None else input_chars,
+    "artChars": len(art_base64),
+    "artBytes": len(decoded),
+    "artFormat": image_format,
+    "artStatus": status,
+    "artMime": str(media.get("artMime") or ""),
+    "artHash": str(media.get("artHash") or ""),
+    "artSource": str(media.get("artSource") or ""),
+  }
+
+
+def _store_art_diagnostics(media: dict[str, Any], input_chars: int, art_preserved: bool) -> dict[str, Any]:
+  diagnostics = _art_diagnostics(media, input_chars)
+  if input_chars > PHONE_MEDIA_ART_BASE64_MAX_CHARS:
+    diagnostics["artStatus"] = "dropped-too-large"
+  elif art_preserved:
+    diagnostics["artStatus"] = "preserved"
+  for key in ("artInputChars", "artBytes", "artFormat", "artStatus"):
+    media[key] = diagnostics[key]
+  return diagnostics
 
 
 def _write_json_atomic(path: str, data: dict[str, Any]) -> None:
@@ -144,6 +213,32 @@ async def get_phone_media(request: web.Request) -> web.Response:
   return web.json_response({"ok": True, "media": media})
 
 
+async def get_phone_media_diagnostics(request: web.Request) -> web.Response:
+  path = _latest_phone_media_path()
+  try:
+    media = _read_latest_phone_media()
+    stat = os.stat(path)
+  except FileNotFoundError:
+    return web.json_response({"ok": True, "present": False})
+  except Exception as exc:
+    return web.json_response({"ok": False, "error": str(exc)}, status=500)
+
+  diagnostics = _art_diagnostics(media, _safe_int(media.get("artInputChars")))
+  for key in ("artBytes", "artFormat", "artStatus"):
+    if key in media:
+      diagnostics[key] = media[key]
+  return web.json_response({
+    "ok": True,
+    "present": True,
+    "path": path,
+    "fileBytes": stat.st_size,
+    "fileAgeSeconds": max(0.0, time.time() - stat.st_mtime),  # noqa: TID251 - file mtime uses epoch time
+    "title": str(media.get("title") or ""),
+    "artist": str(media.get("artist") or ""),
+    **diagnostics,
+  })
+
+
 async def set_phone_media(request: web.Request) -> web.Response:
   try:
     body = await request.json()
@@ -151,12 +246,14 @@ async def set_phone_media(request: web.Request) -> web.Response:
     return web.json_response({"ok": False, "error": "invalid json"}, status=400)
   if not isinstance(body, dict):
     return web.json_response({"ok": False, "error": "invalid body"}, status=400)
+  input_art_chars = _art_input_chars(body)
   media = _normalize_phone_media(body)
   try:
     previous = _read_latest_phone_media()
   except Exception:
     previous = {}
   art_preserved = _preserve_phone_media_art(media, previous)
+  diagnostics = _store_art_diagnostics(media, input_art_chars, art_preserved)
   try:
     path = _write_phone_media(media)
   except Exception as exc:
@@ -164,12 +261,13 @@ async def set_phone_media(request: web.Request) -> web.Response:
   return web.json_response({
     "ok": True,
     "path": path,
-    "artChars": len(media["artBase64"]),
     "artPreserved": art_preserved,
+    **diagnostics,
   })
 
 
 def register(app: web.Application) -> None:
   app.router.add_get("/health", health)
+  app.router.add_get("/phone/media/diagnostics", get_phone_media_diagnostics)
   app.router.add_get("/phone/media", get_phone_media)
   app.router.add_post("/phone/media", set_phone_media)

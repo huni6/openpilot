@@ -5,7 +5,9 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from functools import lru_cache
+from io import BytesIO
 import base64
+import binascii
 import math
 import os
 import time
@@ -414,6 +416,48 @@ def rl_color(color: tuple[int, int, int] | tuple[int, int, int, int], alpha: int
     return _cached_rl_color(int(r), int(g), int(b), int(a))
 
 
+def decode_phone_media_art_base64(value: str) -> bytes:
+    payload = value.split(",", 1)[1] if "," in value[:96] else value
+    compact = "".join(payload.split())
+    if not compact:
+        return b""
+    compact += "=" * (-len(compact) % 4)
+    return base64.b64decode(compact, altchars=b"-_", validate=True)
+
+
+def phone_media_image_extensions(data: bytes, mime: str) -> tuple[str, ...]:
+    detected = ""
+    if data.startswith(b"\xff\xd8\xff"):
+        detected = ".jpg"
+    elif data.startswith(b"\x89PNG\r\n\x1a\n"):
+        detected = ".png"
+    elif data.startswith((b"GIF87a", b"GIF89a")):
+        detected = ".gif"
+    elif data.startswith(b"BM"):
+        detected = ".bmp"
+    elif len(data) >= 12 and data.startswith(b"RIFF") and data[8:12] == b"WEBP":
+        detected = ".webp"
+
+    mime_lower = mime.lower()
+    mime_extension = ""
+    if "jpeg" in mime_lower or "jpg" in mime_lower:
+        mime_extension = ".jpg"
+    elif "png" in mime_lower:
+        mime_extension = ".png"
+    elif "webp" in mime_lower:
+        mime_extension = ".webp"
+    elif "gif" in mime_lower:
+        mime_extension = ".gif"
+    elif "bmp" in mime_lower:
+        mime_extension = ".bmp"
+
+    extensions: list[str] = []
+    for extension in (detected, mime_extension, ".png", ".jpg"):
+        if extension and extension not in extensions:
+            extensions.append(extension)
+    return tuple(extensions)
+
+
 def radar_point_distance_label(point: RadarPointMarker) -> str:
     if point.absolute_speed_kph is not None and point.absolute_speed_kph <= RADAR_STATIC_OBJECT_SPEED_KPH:
         return ""
@@ -651,6 +695,9 @@ class ClusterUiRenderer:
         self._phone_media_art_texture = None
         self._phone_media_art_hash = ""
         self._phone_media_art_size: tuple[int, int] | None = None
+        self._phone_media_art_failed_hash = ""
+        self._phone_media_art_failure_stage = ""
+        self._phone_media_art_failures_logged: set[str] = set()
         self._phone_media_unicode_font = None
         self._phone_media_unicode_codepoints: tuple[int, ...] = ()
         self._ambient_reference_texture = None
@@ -855,6 +902,9 @@ class ClusterUiRenderer:
             self._phone_media_art_texture = None
             self._phone_media_art_hash = ""
             self._phone_media_art_size = None
+        self._phone_media_art_failed_hash = ""
+        self._phone_media_art_failure_stage = ""
+        self._phone_media_art_failures_logged.clear()
         if self._phone_media_unicode_font is not None:
             rl.unload_font(self._phone_media_unicode_font)
             self._phone_media_unicode_font = None
@@ -2474,6 +2524,7 @@ class ClusterUiRenderer:
             self._draw_ambient_step("drive_status", lambda: self._draw_ambient_drive_status(state))
             self._draw_ambient_step("clock", lambda: self._draw_ambient_clock(state))
             self._draw_ambient_step("phone_media", lambda: self._draw_phone_media_panel(state.phone_media, ambient=True))
+            self._draw_ambient_step("phone_media_debug", lambda: self._draw_phone_media_debug(state.phone_media))
             self._draw_ambient_step("bsm_edges", lambda: self._draw_ambient_bsm_edges(state))
         finally:
             rl.rl_pop_matrix()
@@ -3065,8 +3116,8 @@ class ClusterUiRenderer:
         return True
 
     def _phone_media_art_texture_for(self, media: PhoneMediaInfo | None):
-        art_hash = media.art_hash if media is not None else ""
         art_base64 = media.art_base64 if media is not None else ""
+        art_hash = media.art_hash if media is not None else ""
         if not art_hash and art_base64:
             art_hash = str(hash(art_base64))
         if not art_base64:
@@ -3075,43 +3126,165 @@ class ClusterUiRenderer:
                 self._phone_media_art_texture = None
                 self._phone_media_art_hash = ""
                 self._phone_media_art_size = None
+            self._phone_media_art_failed_hash = ""
+            self._phone_media_art_failure_stage = ""
             return None
         if self._phone_media_art_texture is not None and art_hash == self._phone_media_art_hash:
             return self._phone_media_art_texture
+        if self._phone_media_art_texture is None and art_hash == self._phone_media_art_failed_hash:
+            return None
         if self._phone_media_art_texture is not None:
             rl.unload_texture(self._phone_media_art_texture)
             self._phone_media_art_texture = None
             self._phone_media_art_hash = ""
             self._phone_media_art_size = None
         try:
-            payload = art_base64.split(",", 1)[1] if "," in art_base64[:64] else art_base64
-            image_bytes = base64.b64decode(payload, validate=False)
-        except Exception:
+            image_bytes = decode_phone_media_art_base64(art_base64)
+        except (binascii.Error, ValueError, UnicodeEncodeError) as exc:
+            self._phone_media_art_failed(art_hash, "base64", len(art_base64), b"", media, exc)
             return None
-        art_mime = media.art_mime.lower() if media is not None else ""
-        extension = ".jpg" if "jpeg" in art_mime or "jpg" in art_mime else ".png"
-        loaded_image = None
+        if not image_bytes:
+            self._phone_media_art_failed(art_hash, "decoded-empty", len(art_base64), image_bytes, media)
+            return None
+
+        loaded_image, decode_error = self._load_phone_media_art_image(image_bytes, media.art_mime if media is not None else "")
+        if not self._is_image_valid(loaded_image):
+            self._phone_media_art_failed(art_hash, "image-decode", len(art_base64), image_bytes, media, decode_error)
+            return None
         try:
-            loaded_image = rl.load_image_from_memory(extension, image_bytes, len(image_bytes))
-            if not self._is_image_valid(loaded_image):
-                return None
             if loaded_image.width != int(PHONE_MEDIA_ART_CONTENT_SIZE) or loaded_image.height != int(PHONE_MEDIA_ART_CONTENT_SIZE):
                 rl.image_resize(loaded_image, int(PHONE_MEDIA_ART_CONTENT_SIZE), int(PHONE_MEDIA_ART_CONTENT_SIZE))
-            self._apply_rounded_image_alpha(loaded_image, int(12))
+            self._apply_rounded_image_alpha(loaded_image, 12)
             texture = rl.load_texture_from_image(loaded_image)
             if not self._is_texture_valid(texture):
                 rl.unload_texture(texture)
+                self._phone_media_art_failed(art_hash, "texture-upload", len(art_base64), image_bytes, media)
                 return None
             rl.set_texture_filter(texture, rl.TextureFilter.TEXTURE_FILTER_BILINEAR)
             self._phone_media_art_texture = texture
             self._phone_media_art_hash = art_hash
             self._phone_media_art_size = (int(texture.width), int(texture.height))
+            self._phone_media_art_failed_hash = ""
+            self._phone_media_art_failure_stage = ""
             return self._phone_media_art_texture
-        except Exception:
+        except Exception as exc:
+            self._phone_media_art_failed(art_hash, "image-process", len(art_base64), image_bytes, media, exc)
             return None
         finally:
             if self._is_image_valid(loaded_image):
                 rl.unload_image(loaded_image)
+
+    def _load_phone_media_art_image(self, image_bytes: bytes, art_mime: str):
+        for extension in phone_media_image_extensions(image_bytes, art_mime):
+            try:
+                image = rl.load_image_from_memory(extension, image_bytes, len(image_bytes))
+            except Exception:
+                continue
+            if self._is_image_valid(image):
+                return image, None
+
+        try:
+            from PIL import Image as PillowImage
+
+            with PillowImage.open(BytesIO(image_bytes)) as source:
+                source.load()
+                converted = source.convert("RGBA")
+                converted.thumbnail((1024, 1024))
+                png_buffer = BytesIO()
+                converted.save(png_buffer, format="PNG")
+            png_bytes = png_buffer.getvalue()
+            image = rl.load_image_from_memory(".png", png_bytes, len(png_bytes))
+            if self._is_image_valid(image):
+                return image, None
+            return None, RuntimeError("Pillow conversion succeeded but raylib PNG decode failed")
+        except Exception as exc:
+            return None, exc
+
+    def _phone_media_art_failed(
+        self,
+        art_hash: str,
+        stage: str,
+        base64_chars: int,
+        image_bytes: bytes,
+        media: PhoneMediaInfo | None,
+        exc: Exception | None = None,
+    ) -> None:
+        self._phone_media_art_failed_hash = art_hash
+        self._phone_media_art_failure_stage = stage
+        log_key = f"{art_hash}:{stage}"
+        if log_key in self._phone_media_art_failures_logged:
+            return
+        if len(self._phone_media_art_failures_logged) >= 32:
+            self._phone_media_art_failures_logged.clear()
+        self._phone_media_art_failures_logged.add(log_key)
+        mime = media.art_mime if media is not None else ""
+        source = getattr(media, "art_source", "") if media is not None else ""
+        detail = " ".join((
+            f"phone media art failed stage={stage} hash={art_hash[:48]}",
+            f"base64_chars={base64_chars} decoded_bytes={len(image_bytes)}",
+            f"magic={image_bytes[:12].hex()} mime={mime!r} source={source!r}",
+        ))
+        self._append_ambient_diag(detail, exc)
+
+    def _draw_phone_media_debug(self, media: PhoneMediaInfo | None) -> None:
+        center_x = DESIGN_WIDTH * 0.5
+        if media is None:
+            status = "no-media-data"
+            input_chars = 0
+            stored_chars = 0
+            decoded_bytes = 0
+            image_format = "none"
+            mime = "-"
+            source = "-"
+            render_status = "NO DATA"
+        else:
+            status = media.art_status or ("received" if media.art_base64 else "missing")
+            input_chars = media.art_input_chars if media.art_input_chars is not None else len(media.art_base64)
+            stored_chars = len(media.art_base64)
+            decoded_bytes = media.art_bytes or 0
+            image_format = media.art_format or "unknown"
+            mime = media.art_mime or "-"
+            source = media.art_source or "-"
+            if self._phone_media_art_texture is not None and self._is_texture_valid(self._phone_media_art_texture):
+                render_status = f"OK {self._phone_media_art_texture.width}x{self._phone_media_art_texture.height}"
+            elif self._phone_media_art_failure_stage:
+                render_status = f"FAILED {self._phone_media_art_failure_stage}"
+            elif not media.art_base64:
+                render_status = "NO ART"
+            else:
+                render_status = "PENDING"
+
+        success = status in ("ok", "preserved", "received") and render_status.startswith("OK")
+        failed = status.startswith("invalid-") or status in ("dropped-too-large", "unknown-image-format") or render_status.startswith("FAILED")
+        status_color = (34, 197, 94) if success else (248, 113, 113) if failed else (251, 191, 36)
+        self._draw_ambient_text("ALBUM ART DEBUG", center_x, 216.0, 34.0, status_color, weight="semibold", anchor="center")
+        self._draw_ambient_text(
+            f"STATUS {status.upper()}  |  RENDER {render_status}",
+            center_x,
+            260.0,
+            27.0,
+            (229, 231, 235),
+            weight="regular",
+            anchor="center",
+        )
+        self._draw_ambient_text(
+            f"INPUT {input_chars}  |  STORED {stored_chars}  |  DECODED {decoded_bytes} B  |  FORMAT {image_format.upper()}",
+            center_x,
+            302.0,
+            22.0,
+            (156, 163, 175),
+            weight="regular",
+            anchor="center",
+        )
+        self._draw_ambient_text(
+            f"MIME {mime}  |  SOURCE {source}",
+            center_x,
+            338.0,
+            20.0,
+            (129, 140, 158),
+            weight="regular",
+            anchor="center",
+        )
 
     @staticmethod
     def _apply_rounded_image_alpha(image, radius_px: int) -> None:

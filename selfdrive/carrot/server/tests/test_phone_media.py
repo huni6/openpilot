@@ -1,6 +1,11 @@
+import base64
+
 from openpilot.selfdrive.carrot.server.features.phone_media import (
+  PHONE_MEDIA_ART_BASE64_MAX_CHARS,
+  _art_diagnostics,
   _normalize_phone_media,
   _preserve_phone_media_art,
+  _store_art_diagnostics,
 )
 
 
@@ -45,3 +50,34 @@ def test_new_art_replaces_previous_art():
 
   assert not _preserve_phone_media_art(update, previous)
   assert update["artBase64"] == "/9j/new"
+
+
+def test_reports_valid_jpeg_art_from_magic_bytes():
+  art = base64.b64encode(b"\xff\xd8\xff\xe0android-jpeg").decode("ascii")
+  normalized = media(artBase64=art, artMime="")
+
+  diagnostics = _store_art_diagnostics(normalized, len(art), False)
+
+  assert diagnostics["artStatus"] == "ok"
+  assert diagnostics["artFormat"] == "jpeg"
+  assert diagnostics["artBytes"] == 16
+  assert normalized["artStatus"] == "ok"
+
+
+def test_reports_oversize_art_drop_in_saved_diagnostics():
+  oversized = "A" * (PHONE_MEDIA_ART_BASE64_MAX_CHARS + 1)
+  normalized = media(artBase64=oversized, artMime="image/jpeg")
+
+  diagnostics = _store_art_diagnostics(normalized, len(oversized), False)
+
+  assert normalized["artBase64"] == ""
+  assert diagnostics["artStatus"] == "dropped-too-large"
+  assert diagnostics["artInputChars"] == len(oversized)
+  assert diagnostics["artChars"] == 0
+
+
+def test_art_diagnostics_rejects_invalid_base64():
+  diagnostics = _art_diagnostics({"artBase64": "%%%", "artMime": "image/jpeg"})
+
+  assert diagnostics["artStatus"].startswith("invalid-base64:")
+  assert diagnostics["artBytes"] == 0

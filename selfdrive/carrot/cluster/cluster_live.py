@@ -378,6 +378,11 @@ class OpenpilotLiveSource:
             art_base64=art_base64,
             art_mime=text_value("artMime", 64),
             art_hash=text_value("artHash", 128),
+            art_source=text_value("artSource", 160),
+            art_input_chars=int_value("artInputChars"),
+            art_bytes=int_value("artBytes"),
+            art_format=text_value("artFormat", 32),
+            art_status=text_value("artStatus", 64),
             updated_at_ms=int_value("updatedAtMs"),
             received_at_ms=int_value("receivedAtMs"),
         )

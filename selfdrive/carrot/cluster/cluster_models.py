@@ -126,6 +126,11 @@ class PhoneMediaInfo:
     art_base64: str = ""
     art_mime: str = ""
     art_hash: str = ""
+    art_source: str = ""
+    art_input_chars: int | None = None
+    art_bytes: int | None = None
+    art_format: str = ""
+    art_status: str = ""
     updated_at_ms: int | None = None
     received_at_ms: int | None = None
 
