@@ -5,7 +5,7 @@ from selfdrive.carrot.cluster.cluster_layout import (
   ambient_power_gauge,
   extrapolated_media_position_ms,
   fitted_text_size,
-  ping_pong_marquee_offset,
+  leftward_loop_marquee_offset,
   smooth_bsm_opacity,
   smooth_ambient_accel,
 )
@@ -52,10 +52,9 @@ def test_fitted_text_size_shrinks_only_to_configured_minimum():
   assert fitted_text_size(800.0, 274.0, 49.0, 34.0) == 34.0
 
 
-def test_ping_pong_marquee_holds_both_ends_and_returns_smoothly():
-  assert ping_pong_marquee_offset(1.0, 60.0, 30.0, 1.5) == 0.0
-  assert ping_pong_marquee_offset(2.5, 60.0, 30.0, 1.5) == -30.0
-  assert ping_pong_marquee_offset(4.0, 60.0, 30.0, 1.5) == -60.0
-  assert ping_pong_marquee_offset(6.0, 60.0, 30.0, 1.5) == -30.0
-  assert ping_pong_marquee_offset(8.0, 60.0, 30.0, 1.5) == 0.0
-  assert ping_pong_marquee_offset(9.5, 60.0, 30.0, 1.5) == -30.0
+def test_leftward_loop_marquee_only_moves_right_to_left():
+  assert leftward_loop_marquee_offset(1.0, 120.0, 30.0, 1.5) == 0.0
+  assert leftward_loop_marquee_offset(2.5, 120.0, 30.0, 1.5) == -30.0
+  assert leftward_loop_marquee_offset(5.0, 120.0, 30.0, 1.5) == -105.0
+  assert leftward_loop_marquee_offset(5.5, 120.0, 30.0, 1.5) == 0.0
+  assert leftward_loop_marquee_offset(7.5, 120.0, 30.0, 1.5) == -15.0

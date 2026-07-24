@@ -63,7 +63,7 @@ from cluster_layout import (
     ambient_power_gauge,
     extrapolated_media_position_ms,
     fitted_text_size,
-    ping_pong_marquee_offset,
+    leftward_loop_marquee_offset,
     smooth_bsm_opacity,
     smooth_ambient_accel,
 )
@@ -255,6 +255,7 @@ PHONE_MEDIA_PROGRESS_H = 4.0
 PHONE_MEDIA_UNICODE_FONT_BASE_SIZE = 160
 PHONE_MEDIA_TITLE_MARQUEE_SPEED = 30.0
 PHONE_MEDIA_TITLE_MARQUEE_HOLD_SECONDS = 1.5
+PHONE_MEDIA_TITLE_MARQUEE_GAP = 72.0
 RADAR_LABEL_DISTANCE_FONT_SIZE = 16
 RADAR_LABEL_SPEED_FONT_SIZE = 14
 VEHICLE_BADGE_DISTANCE_FONT_SIZE = 17
@@ -3062,9 +3063,10 @@ class ClusterUiRenderer:
         if raw_title != self._phone_media_title_key:
             self._phone_media_title_key = raw_title
             self._phone_media_title_started_at = time.monotonic()
-        title_offset = ping_pong_marquee_offset(
+        title_loop_distance = rendered_title_width + PHONE_MEDIA_TITLE_MARQUEE_GAP if title_overflow > 0.0 else 0.0
+        title_offset = leftward_loop_marquee_offset(
             time.monotonic() - self._phone_media_title_started_at,
-            title_overflow,
+            title_loop_distance,
             PHONE_MEDIA_TITLE_MARQUEE_SPEED,
             PHONE_MEDIA_TITLE_MARQUEE_HOLD_SECONDS,
         )
@@ -3092,16 +3094,20 @@ class ClusterUiRenderer:
             title_clip_h,
         )
         try:
-            if ambient:
-                self._draw_ambient_text(
-                    raw_title, PHONE_MEDIA_TEXT_X + title_offset, PHONE_MEDIA_TITLE_Y, title_size, WHITE,
-                    weight="semibold", font_override=media_font,
-                )
-            else:
-                self._draw_text(
-                    raw_title, PHONE_MEDIA_TEXT_X + title_offset, PHONE_MEDIA_TITLE_Y, title_size, theme.text,
-                    font_override=media_font,
-                )
+            title_positions = [PHONE_MEDIA_TEXT_X + title_offset]
+            if title_loop_distance > 0.0:
+                title_positions.append(PHONE_MEDIA_TEXT_X + title_offset + title_loop_distance)
+            for title_x in title_positions:
+                if ambient:
+                    self._draw_ambient_text(
+                        raw_title, title_x, PHONE_MEDIA_TITLE_Y, title_size, WHITE,
+                        weight="semibold", font_override=media_font,
+                    )
+                else:
+                    self._draw_text(
+                        raw_title, title_x, PHONE_MEDIA_TITLE_Y, title_size, theme.text,
+                        font_override=media_font,
+                    )
         finally:
             rl.end_scissor_mode()
         if artist:

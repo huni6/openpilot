@@ -65,33 +65,24 @@ def fitted_text_size(
   return _clamp(max_size * available_width / measured_width, min_size, max_size)
 
 
-def ping_pong_marquee_offset(
+def leftward_loop_marquee_offset(
   elapsed_seconds: float,
-  overflow_width: float,
+  loop_distance: float,
   speed_px_per_second: float,
   hold_seconds: float,
 ) -> float:
-  if overflow_width <= 0.0 or speed_px_per_second <= 0.0:
+  if loop_distance <= 0.0 or speed_px_per_second <= 0.0:
     return 0.0
   hold = max(0.0, hold_seconds)
-  move = overflow_width / speed_px_per_second
-  cycle = hold * 2.0 + move * 2.0
+  move = loop_distance / speed_px_per_second
+  cycle = hold + move
   if cycle <= 0.0:
     return 0.0
 
   phase = max(0.0, elapsed_seconds) % cycle
   if phase <= hold:
     return 0.0
-  phase -= hold
-  if phase <= move:
-    return -min(overflow_width, phase * speed_px_per_second)
-  phase -= move
-  if phase <= hold:
-    return -overflow_width
-  phase -= hold
-  if phase <= move:
-    return -overflow_width + min(overflow_width, phase * speed_px_per_second)
-  return 0.0
+  return -min(loop_distance, (phase - hold) * speed_px_per_second)
 
 
 def ambient_bsm_edges(left_blindspot: bool, right_blindspot: bool) -> tuple[bool, bool]:
