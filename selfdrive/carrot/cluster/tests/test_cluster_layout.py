@@ -1,6 +1,14 @@
 import math
 
-from selfdrive.carrot.cluster.cluster_layout import ambient_power_gauge, ambient_bsm_edges, extrapolated_media_position_ms, smooth_ambient_accel
+from selfdrive.carrot.cluster.cluster_layout import (
+  ambient_bsm_edges,
+  ambient_power_gauge,
+  extrapolated_media_position_ms,
+  fitted_text_size,
+  ping_pong_marquee_offset,
+  smooth_bsm_opacity,
+  smooth_ambient_accel,
+)
 
 
 def test_ambient_power_gauge_maps_accel_to_signed_fill():
@@ -24,8 +32,30 @@ def test_ambient_bsm_edges_keeps_left_and_right_independent():
   assert ambient_bsm_edges(False, True) == (False, True)
 
 
+def test_smooth_bsm_opacity_fades_in_and_out_over_configured_duration():
+  assert smooth_bsm_opacity(0.0, True, 0.175, 0.35) == 0.5
+  assert smooth_bsm_opacity(0.5, True, 0.175, 0.35) == 1.0
+  assert smooth_bsm_opacity(1.0, False, 0.0875, 0.35) == 0.75
+  assert smooth_bsm_opacity(0.25, False, 0.175, 0.35) == 0.0
+
+
 def test_extrapolated_media_position_advances_only_while_playing():
   assert extrapolated_media_position_ms(10_000, 60_000, True, 100_000, 102_500) == 12_500
   assert extrapolated_media_position_ms(10_000, 60_000, False, 100_000, 102_500) == 10_000
   assert extrapolated_media_position_ms(59_000, 60_000, True, 100_000, 102_500) == 60_000
   assert extrapolated_media_position_ms(None, 60_000, True, 100_000, 102_500) is None
+
+
+def test_fitted_text_size_shrinks_only_to_configured_minimum():
+  assert fitted_text_size(200.0, 274.0, 49.0, 34.0) == 49.0
+  assert fitted_text_size(392.0, 274.0, 49.0, 34.0) == 34.25
+  assert fitted_text_size(800.0, 274.0, 49.0, 34.0) == 34.0
+
+
+def test_ping_pong_marquee_holds_both_ends_and_returns_smoothly():
+  assert ping_pong_marquee_offset(1.0, 60.0, 30.0, 1.5) == 0.0
+  assert ping_pong_marquee_offset(2.5, 60.0, 30.0, 1.5) == -30.0
+  assert ping_pong_marquee_offset(4.0, 60.0, 30.0, 1.5) == -60.0
+  assert ping_pong_marquee_offset(6.0, 60.0, 30.0, 1.5) == -30.0
+  assert ping_pong_marquee_offset(8.0, 60.0, 30.0, 1.5) == 0.0
+  assert ping_pong_marquee_offset(9.5, 60.0, 30.0, 1.5) == -30.0

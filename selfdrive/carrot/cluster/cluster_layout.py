@@ -54,5 +54,62 @@ def extrapolated_media_position_ms(
   return max(0, position)
 
 
+def fitted_text_size(
+  measured_width: float,
+  available_width: float,
+  max_size: float,
+  min_size: float,
+) -> float:
+  if measured_width <= 0.0 or available_width <= 0.0:
+    return max_size
+  return _clamp(max_size * available_width / measured_width, min_size, max_size)
+
+
+def ping_pong_marquee_offset(
+  elapsed_seconds: float,
+  overflow_width: float,
+  speed_px_per_second: float,
+  hold_seconds: float,
+) -> float:
+  if overflow_width <= 0.0 or speed_px_per_second <= 0.0:
+    return 0.0
+  hold = max(0.0, hold_seconds)
+  move = overflow_width / speed_px_per_second
+  cycle = hold * 2.0 + move * 2.0
+  if cycle <= 0.0:
+    return 0.0
+
+  phase = max(0.0, elapsed_seconds) % cycle
+  if phase <= hold:
+    return 0.0
+  phase -= hold
+  if phase <= move:
+    return -min(overflow_width, phase * speed_px_per_second)
+  phase -= move
+  if phase <= hold:
+    return -overflow_width
+  phase -= hold
+  if phase <= move:
+    return -overflow_width + min(overflow_width, phase * speed_px_per_second)
+  return 0.0
+
+
 def ambient_bsm_edges(left_blindspot: bool, right_blindspot: bool) -> tuple[bool, bool]:
   return bool(left_blindspot), bool(right_blindspot)
+
+
+def smooth_bsm_opacity(
+  previous: float,
+  active: bool,
+  elapsed_seconds: float,
+  fade_seconds: float,
+) -> float:
+  value = previous if math.isfinite(previous) else 0.0
+  value = _clamp(value, 0.0, 1.0)
+  target = 1.0 if active else 0.0
+  if fade_seconds <= 0.0:
+    return target
+  step = _clamp(float(elapsed_seconds) / fade_seconds, 0.0, 1.0)
+  if target > value:
+    return min(target, value + step)
+  return max(target, value - step)

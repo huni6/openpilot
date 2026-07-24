@@ -58,7 +58,15 @@ from cluster_models import (
     PhoneMediaInfo,
     RouteOverlay,
 )
-from cluster_layout import ambient_bsm_edges, ambient_power_gauge, extrapolated_media_position_ms, smooth_ambient_accel
+from cluster_layout import (
+    ambient_bsm_edges,
+    ambient_power_gauge,
+    extrapolated_media_position_ms,
+    fitted_text_size,
+    ping_pong_marquee_offset,
+    smooth_bsm_opacity,
+    smooth_ambient_accel,
+)
 from cluster_scene import (
     ClusterScene,
     MeshStrip,
@@ -173,10 +181,11 @@ AMBIENT_GAP_BAR_GAP = 10.0
 AMBIENT_CLOCK_RIGHT_X = 1845.0
 AMBIENT_CLOCK_Y = 62.5
 AMBIENT_CLOCK_SIZE = 50.0
-AMBIENT_BSM_W = 300.0
+AMBIENT_BSM_W = 210.0
 AMBIENT_BSM_COLOR = (204, 88, 0)
 AMBIENT_BSM_EDGE_ALPHA = 190.0
 AMBIENT_BSM_CORE_ALPHA = 90.0
+AMBIENT_BSM_FADE_SECONDS = 0.35
 AMBIENT_LFA_ACTIVE_COLOR = (46, 192, 79)
 AMBIENT_LFA_INACTIVE_COLOR = (126, 135, 148)
 AMBIENT_TEXT_EDGE_BOOST_ALPHA = int(os.environ.get("CLUSTER_AMBIENT_TEXT_EDGE_BOOST_ALPHA", "80"))
@@ -239,10 +248,13 @@ PHONE_MEDIA_TITLE_Y = 189.5
 PHONE_MEDIA_ARTIST_Y = 240.5
 PHONE_MEDIA_PROGRESS_Y = 306.0
 PHONE_MEDIA_TITLE_SIZE = 49.0
+PHONE_MEDIA_TITLE_MIN_SIZE = 34.0
 PHONE_MEDIA_ARTIST_SIZE = 30.0
 PHONE_MEDIA_TIME_SIZE = 15.0
 PHONE_MEDIA_PROGRESS_H = 4.0
 PHONE_MEDIA_UNICODE_FONT_BASE_SIZE = 160
+PHONE_MEDIA_TITLE_MARQUEE_SPEED = 30.0
+PHONE_MEDIA_TITLE_MARQUEE_HOLD_SECONDS = 1.5
 RADAR_LABEL_DISTANCE_FONT_SIZE = 16
 RADAR_LABEL_SPEED_FONT_SIZE = 14
 VEHICLE_BADGE_DISTANCE_FONT_SIZE = 17
@@ -646,6 +658,9 @@ class ClusterUiRenderer:
         self._accel_text_width = 0.0
         self._ambient_accel_display = 0.0
         self._ambient_accel_updated_at: float | None = None
+        self._ambient_bsm_left_opacity = 0.0
+        self._ambient_bsm_right_opacity = 0.0
+        self._ambient_bsm_updated_at: float | None = None
         self._capture_target = None
         self._portrait_upload_target = None
         self._portrait_upload_target_size: tuple[int, int] | None = None
@@ -676,6 +691,8 @@ class ClusterUiRenderer:
         self._phone_media_art_failures_logged: set[str] = set()
         self._phone_media_unicode_font = None
         self._phone_media_unicode_codepoints: tuple[int, ...] = ()
+        self._phone_media_title_key = ""
+        self._phone_media_title_started_at = 0.0
         self._ambient_reference_texture = None
         self._ambient_reference_texture_path = ""
         self._ambient_render_error_logged = False
@@ -2578,12 +2595,21 @@ class ClusterUiRenderer:
 
     def _draw_ambient_bsm_edges(self, state: ClusterUiState) -> None:
         left_active, right_active = ambient_bsm_edges(state.left_blindspot, state.right_blindspot)
-        if left_active:
-            self._draw_ambient_bsm_edge("left")
-        if right_active:
-            self._draw_ambient_bsm_edge("right")
+        now = time.monotonic()
+        elapsed = 1.0 / 30.0 if self._ambient_bsm_updated_at is None else now - self._ambient_bsm_updated_at
+        self._ambient_bsm_updated_at = now
+        self._ambient_bsm_left_opacity = smooth_bsm_opacity(
+            self._ambient_bsm_left_opacity, left_active, elapsed, AMBIENT_BSM_FADE_SECONDS
+        )
+        self._ambient_bsm_right_opacity = smooth_bsm_opacity(
+            self._ambient_bsm_right_opacity, right_active, elapsed, AMBIENT_BSM_FADE_SECONDS
+        )
+        if self._ambient_bsm_left_opacity > 0.0:
+            self._draw_ambient_bsm_edge("left", self._ambient_bsm_left_opacity)
+        if self._ambient_bsm_right_opacity > 0.0:
+            self._draw_ambient_bsm_edge("right", self._ambient_bsm_right_opacity)
 
-    def _draw_ambient_bsm_edge(self, side: str) -> None:
+    def _draw_ambient_bsm_edge(self, side: str, opacity: float) -> None:
         steps = max(1, int(round(AMBIENT_BSM_W / 3.0)))
         step_w = AMBIENT_BSM_W / float(steps)
         for index in range(steps):
@@ -2594,6 +2620,7 @@ class ClusterUiRenderer:
                 alpha = AMBIENT_BSM_EDGE_ALPHA - (t / 0.25) * (AMBIENT_BSM_EDGE_ALPHA - AMBIENT_BSM_CORE_ALPHA)
             else:
                 alpha = AMBIENT_BSM_CORE_ALPHA * pow(max(0.0, 1.0 - (t - 0.25) / 0.75), 0.9)
+            alpha *= opacity
             if alpha <= 0.0:
                 continue
             x = index * step_w if side == "left" else DESIGN_WIDTH - (index + 1) * step_w
@@ -2991,23 +3018,56 @@ class ClusterUiRenderer:
                 rl.unload_font(self._phone_media_unicode_font)
                 self._phone_media_unicode_font = None
                 self._phone_media_unicode_codepoints = ()
+            self._phone_media_title_key = ""
+            self._phone_media_title_started_at = 0.0
             return False
 
         theme = current_cluster_theme("dark") if ambient else self._current_theme()
         text_w = PHONE_MEDIA_W - PHONE_MEDIA_ART_SIZE - 24.0
+        raw_title = media.title or "Now playing"
         media_font = self._phone_media_font_for(
-            f"{media.title or 'Now playing'}\n{media.artist or ('Paused' if not media.is_playing else '')}"
+            f"{raw_title}\n{media.artist or ('Paused' if not media.is_playing else '')}"
         )
         if ambient:
-            title = self._ellipsize_ambient_text(
-                media.title or "Now playing", PHONE_MEDIA_TITLE_SIZE, text_w, "semibold", media_font
-            )
             artist = self._ellipsize_ambient_text(
                 media.artist or "", PHONE_MEDIA_ARTIST_SIZE, text_w, "regular", media_font
             )
+            title_font = media_font or self._ambient_font("semibold")
+            title_spacing = 0.0
         else:
-            title = self._ellipsize_text(media.title or "Now playing", PHONE_MEDIA_TITLE_SIZE, text_w, media_font)
             artist = self._ellipsize_text(media.artist or "", PHONE_MEDIA_ARTIST_SIZE, text_w, media_font)
+            title_font = media_font or self._font or rl.get_font_default()
+            title_spacing = max(1.0, PHONE_MEDIA_TITLE_SIZE * 0.02)
+
+        title_width, _ = self._measure_text_with_font(
+            title_font,
+            raw_title,
+            PHONE_MEDIA_TITLE_SIZE,
+            title_spacing,
+        )
+        title_size = fitted_text_size(
+            title_width,
+            text_w,
+            PHONE_MEDIA_TITLE_SIZE,
+            PHONE_MEDIA_TITLE_MIN_SIZE,
+        )
+        title_spacing = 0.0 if ambient else max(1.0, title_size * 0.02)
+        rendered_title_width, _ = self._measure_text_with_font(
+            title_font,
+            raw_title,
+            title_size,
+            title_spacing,
+        )
+        title_overflow = max(0.0, rendered_title_width - text_w)
+        if raw_title != self._phone_media_title_key:
+            self._phone_media_title_key = raw_title
+            self._phone_media_title_started_at = time.monotonic()
+        title_offset = ping_pong_marquee_offset(
+            time.monotonic() - self._phone_media_title_started_at,
+            title_overflow,
+            PHONE_MEDIA_TITLE_MARQUEE_SPEED,
+            PHONE_MEDIA_TITLE_MARQUEE_HOLD_SECONDS,
+        )
         texture = self._phone_media_art_texture_for(media)
 
         if texture is not None and texture.width > 0 and texture.height > 0:
@@ -3023,16 +3083,27 @@ class ClusterUiRenderer:
         else:
             self._rounded_rect(PHONE_MEDIA_X, PHONE_MEDIA_Y, PHONE_MEDIA_ART_SIZE, PHONE_MEDIA_ART_SIZE, 18.0, theme.panel_bg, theme.faint, 2.0)
 
-        if ambient:
-            self._draw_ambient_text(
-                title, PHONE_MEDIA_TEXT_X, PHONE_MEDIA_TITLE_Y, PHONE_MEDIA_TITLE_SIZE, WHITE,
-                weight="semibold", font_override=media_font,
-            )
-        else:
-            self._draw_text(
-                title, PHONE_MEDIA_TEXT_X, PHONE_MEDIA_TITLE_Y, PHONE_MEDIA_TITLE_SIZE, theme.text,
-                font_override=media_font,
-            )
+        title_clip_y = int(math.floor(PHONE_MEDIA_TITLE_Y - PHONE_MEDIA_TITLE_SIZE * 0.62))
+        title_clip_h = int(math.ceil(PHONE_MEDIA_TITLE_SIZE * 1.24))
+        rl.begin_scissor_mode(
+            int(PHONE_MEDIA_TEXT_X),
+            title_clip_y,
+            int(math.ceil(text_w)),
+            title_clip_h,
+        )
+        try:
+            if ambient:
+                self._draw_ambient_text(
+                    raw_title, PHONE_MEDIA_TEXT_X + title_offset, PHONE_MEDIA_TITLE_Y, title_size, WHITE,
+                    weight="semibold", font_override=media_font,
+                )
+            else:
+                self._draw_text(
+                    raw_title, PHONE_MEDIA_TEXT_X + title_offset, PHONE_MEDIA_TITLE_Y, title_size, theme.text,
+                    font_override=media_font,
+                )
+        finally:
+            rl.end_scissor_mode()
         if artist:
             if ambient:
                 self._draw_ambient_text(
