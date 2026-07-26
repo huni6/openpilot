@@ -178,7 +178,7 @@ AMBIENT_GAP_Y = 142.0
 AMBIENT_GAP_BAR_W = 30.0
 AMBIENT_GAP_BAR_H = 12.0
 AMBIENT_GAP_BAR_GAP = 10.0
-AMBIENT_CLOCK_RIGHT_X = 1845.0
+AMBIENT_CLOCK_RIGHT_X = 1875.0
 AMBIENT_CLOCK_Y = 62.5
 AMBIENT_CLOCK_SIZE = 50.0
 AMBIENT_BSM_W = 210.0
@@ -2753,7 +2753,7 @@ class ClusterUiRenderer:
             AMBIENT_TOP_ROW_Y,
             AMBIENT_SPEED_LIMIT_TEXT_SIZE,
             TEXT,
-            weight="medium",
+            weight="semibold",
             anchor="center",
         )
 
