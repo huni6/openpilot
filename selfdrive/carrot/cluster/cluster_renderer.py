@@ -84,13 +84,13 @@ CLUSTER_DIR = Path(__file__).resolve().parent
 SELFDRIVE_DIR = CLUSTER_DIR.parents[1]
 OPENPILOT_FONT_DIR = SELFDRIVE_DIR / "assets" / "fonts"
 OPENPILOT_ADDON_FONT_DIR = SELFDRIVE_DIR / "assets" / "addon" / "font"
-KAIGEN_GOTHIC_KR_BOLD_FONT_PATH = OPENPILOT_FONT_DIR / "KaiGenGothicKR-Bold.ttf"
 JETBRAINS_MONO_FONT_PATH = OPENPILOT_FONT_DIR / "JetBrainsMono-Medium.ttf"
-INTER_LIGHT_FONT_PATH = OPENPILOT_FONT_DIR / "Inter-Light.ttf"
-INTER_REGULAR_FONT_PATH = OPENPILOT_FONT_DIR / "Inter-Regular.ttf"
-INTER_MEDIUM_FONT_PATH = OPENPILOT_FONT_DIR / "Inter-Medium.ttf"
-INTER_SEMIBOLD_FONT_PATH = OPENPILOT_FONT_DIR / "Inter-SemiBold.ttf"
-INTER_BOLD_FONT_PATH = OPENPILOT_FONT_DIR / "Inter-Bold.ttf"
+PRETENDARD_LIGHT_FONT_PATH = OPENPILOT_FONT_DIR / "Pretendard-Light.ttf"
+PRETENDARD_REGULAR_FONT_PATH = OPENPILOT_FONT_DIR / "Pretendard-Regular.ttf"
+PRETENDARD_MEDIUM_FONT_PATH = OPENPILOT_FONT_DIR / "Pretendard-Medium.ttf"
+PRETENDARD_SEMIBOLD_FONT_PATH = OPENPILOT_FONT_DIR / "Pretendard-SemiBold.ttf"
+PRETENDARD_BOLD_FONT_PATH = OPENPILOT_FONT_DIR / "Pretendard-Bold.ttf"
+PHONE_MEDIA_UNICODE_FONT_PATH = PRETENDARD_BOLD_FONT_PATH
 VEHICLE_MODEL_PATH = CLUSTER_DIR / "assets" / "models" / "cybertruck" / "cybertruck_cluster.obj"
 EGO_VEHICLE_TEXTURE_PATH = SELFDRIVE_DIR / "assets" / "icons_mici" / "ego_vehicle_custom.png"
 LFA_ICON_PATH = SELFDRIVE_DIR / "assets" / "icons_mici" / "carrot_wheel_lane.png"
@@ -1528,11 +1528,11 @@ class ClusterUiRenderer:
         self._ambient_fonts.clear()
         self._owned_ambient_fonts.clear()
         for name, path in (
-            ("light", INTER_LIGHT_FONT_PATH),
-            ("regular", INTER_REGULAR_FONT_PATH),
-            ("medium", INTER_MEDIUM_FONT_PATH),
-            ("semibold", INTER_SEMIBOLD_FONT_PATH),
-            ("bold", INTER_BOLD_FONT_PATH),
+            ("light", PRETENDARD_LIGHT_FONT_PATH),
+            ("regular", PRETENDARD_REGULAR_FONT_PATH),
+            ("medium", PRETENDARD_MEDIUM_FONT_PATH),
+            ("semibold", PRETENDARD_SEMIBOLD_FONT_PATH),
+            ("bold", PRETENDARD_BOLD_FONT_PATH),
         ):
             if not path.exists():
                 continue
@@ -1575,13 +1575,13 @@ class ClusterUiRenderer:
             rl.unload_font(self._phone_media_unicode_font)
             self._phone_media_unicode_font = None
             self._phone_media_unicode_codepoints = ()
-        if not KAIGEN_GOTHIC_KR_BOLD_FONT_PATH.exists():
+        if not PHONE_MEDIA_UNICODE_FONT_PATH.exists():
             self._phone_media_unicode_codepoints = codepoints
             return None
         try:
             codepoint_array = rl.ffi.new("int[]", codepoints)
             font = rl.load_font_ex(
-                str(KAIGEN_GOTHIC_KR_BOLD_FONT_PATH),
+                str(PHONE_MEDIA_UNICODE_FONT_PATH),
                 PHONE_MEDIA_UNICODE_FONT_BASE_SIZE,
                 rl.ffi.cast("int *", codepoint_array),
                 len(codepoints),
@@ -1600,12 +1600,12 @@ class ClusterUiRenderer:
 
     def _font_candidates(self) -> list[Path]:
         return [
-            KAIGEN_GOTHIC_KR_BOLD_FONT_PATH,
-            OPENPILOT_ADDON_FONT_DIR / "KaiGenGothicKR-Bold.ttf",
+            PRETENDARD_MEDIUM_FONT_PATH,
+            OPENPILOT_ADDON_FONT_DIR / "Pretendard-Medium.ttf",
             JETBRAINS_MONO_FONT_PATH,
             OPENPILOT_FONT_DIR / "JetBrainsMono-Bold.ttf",
-            Path("/data/openpilot/selfdrive/assets/fonts/KaiGenGothicKR-Bold.ttf"),
-            Path("/data/openpilot/selfdrive/assets/addon/font/KaiGenGothicKR-Bold.ttf"),
+            Path("/data/openpilot/selfdrive/assets/fonts/Pretendard-Medium.ttf"),
+            Path("/data/openpilot/selfdrive/assets/addon/font/Pretendard-Medium.ttf"),
             Path("/usr/share/fonts/truetype/jetbrains-mono/JetBrainsMono-Medium.ttf"),
             Path("/usr/share/fonts/TTF/JetBrainsMono-Medium.ttf"),
             Path("/usr/local/share/fonts/JetBrainsMono-Medium.ttf"),
@@ -3033,9 +3033,9 @@ class ClusterUiRenderer:
         )
         if ambient:
             artist = self._ellipsize_ambient_text(
-                media.artist or "", PHONE_MEDIA_ARTIST_SIZE, text_w, "regular", media_font
+                media.artist or "", PHONE_MEDIA_ARTIST_SIZE, text_w, "bold", media_font
             )
-            title_font = media_font or self._ambient_font("semibold")
+            title_font = media_font or self._ambient_font("bold")
             title_spacing = 0.0
         else:
             artist = self._ellipsize_text(media.artist or "", PHONE_MEDIA_ARTIST_SIZE, text_w, media_font)
@@ -3103,7 +3103,7 @@ class ClusterUiRenderer:
                 if ambient:
                     self._draw_ambient_text(
                         raw_title, title_x, PHONE_MEDIA_TITLE_Y, title_size, WHITE,
-                        weight="semibold", font_override=media_font,
+                        weight="bold", font_override=media_font,
                     )
                 else:
                     self._draw_text(
@@ -3116,7 +3116,7 @@ class ClusterUiRenderer:
             if ambient:
                 self._draw_ambient_text(
                     artist, PHONE_MEDIA_TEXT_X, PHONE_MEDIA_ARTIST_Y, PHONE_MEDIA_ARTIST_SIZE, (209, 213, 219),
-                    weight="regular", font_override=media_font,
+                    weight="bold", font_override=media_font,
                 )
             else:
                 self._draw_text(
