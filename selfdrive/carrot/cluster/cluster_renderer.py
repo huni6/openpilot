@@ -90,6 +90,7 @@ INTER_LIGHT_FONT_PATH = OPENPILOT_FONT_DIR / "Inter-Light.ttf"
 INTER_REGULAR_FONT_PATH = OPENPILOT_FONT_DIR / "Inter-Regular.ttf"
 INTER_MEDIUM_FONT_PATH = OPENPILOT_FONT_DIR / "Inter-Medium.ttf"
 INTER_SEMIBOLD_FONT_PATH = OPENPILOT_FONT_DIR / "Inter-SemiBold.ttf"
+INTER_BOLD_FONT_PATH = OPENPILOT_FONT_DIR / "Inter-Bold.ttf"
 VEHICLE_MODEL_PATH = CLUSTER_DIR / "assets" / "models" / "cybertruck" / "cybertruck_cluster.obj"
 EGO_VEHICLE_TEXTURE_PATH = SELFDRIVE_DIR / "assets" / "icons_mici" / "ego_vehicle_custom.png"
 LFA_ICON_PATH = SELFDRIVE_DIR / "assets" / "icons_mici" / "carrot_wheel_lane.png"
@@ -1531,6 +1532,7 @@ class ClusterUiRenderer:
             ("regular", INTER_REGULAR_FONT_PATH),
             ("medium", INTER_MEDIUM_FONT_PATH),
             ("semibold", INTER_SEMIBOLD_FONT_PATH),
+            ("bold", INTER_BOLD_FONT_PATH),
         ):
             if not path.exists():
                 continue
@@ -2753,7 +2755,7 @@ class ClusterUiRenderer:
             AMBIENT_TOP_ROW_Y,
             AMBIENT_SPEED_LIMIT_TEXT_SIZE,
             TEXT,
-            weight="semibold",
+            weight="bold",
             anchor="center",
         )
 
