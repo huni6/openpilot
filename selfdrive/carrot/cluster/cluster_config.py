@@ -49,7 +49,7 @@ CLUSTER_THEME_AUTO = 0
 CLUSTER_THEME_DARK = 1
 CLUSTER_THEME_LIGHT = 2
 CLUSTER_DARK_BRIGHTNESS_PERCENT = 30
-CLUSTER_LIGHT_BRIGHTNESS_PERCENT = 60
+CLUSTER_LIGHT_BRIGHTNESS_PERCENT = 80
 CLUSTER_ENCODER_AUTO = 0
 CLUSTER_ENCODER_JPEG = 1
 CLUSTER_ENCODER_HARDWARE = 2
@@ -451,10 +451,9 @@ def kst_time_tuple(now: float | None = None) -> time.struct_time:
 
 def kst_clock_text_12h(*, include_seconds: bool = False, now: float | None = None) -> str:
     local_time = kst_time_tuple(now)
-    period = "AM" if local_time.tm_hour < 12 else "PM"
     hour = local_time.tm_hour % 12 or 12
     seconds = f":{local_time.tm_sec:02d}" if include_seconds else ""
-    return f"{period} {hour}:{local_time.tm_min:02d}{seconds}"
+    return f"{hour}:{local_time.tm_min:02d}{seconds}"
 
 
 def current_cluster_theme(mode: object = "auto", now: float | None = None) -> ClusterTheme:
