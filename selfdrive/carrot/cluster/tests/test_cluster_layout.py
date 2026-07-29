@@ -1,5 +1,6 @@
 import math
 
+from selfdrive.carrot.cluster.cluster_config import cluster_theme_brightness_percent, kst_clock_text_12h
 from selfdrive.carrot.cluster.cluster_layout import (
   ambient_bsm_edges,
   ambient_power_gauge,
@@ -9,6 +10,25 @@ from selfdrive.carrot.cluster.cluster_layout import (
   smooth_bsm_opacity,
   smooth_ambient_accel,
 )
+
+
+def test_cluster_theme_brightness_uses_fixed_dark_and_light_levels():
+  assert cluster_theme_brightness_percent("dark") == 30
+  assert cluster_theme_brightness_percent("light") == 60
+
+
+def test_cluster_theme_brightness_auto_switches_on_kst_schedule():
+  assert cluster_theme_brightness_percent("auto", 1_767_301_140) == 30  # 2026-01-02 05:59 KST
+  assert cluster_theme_brightness_percent("auto", 1_767_301_200) == 60  # 2026-01-02 06:00 KST
+  assert cluster_theme_brightness_percent("auto", 1_767_344_340) == 60  # 2026-01-02 17:59 KST
+  assert cluster_theme_brightness_percent("auto", 1_767_344_400) == 30  # 2026-01-02 18:00 KST
+
+
+def test_kst_clock_text_12h_prefixes_period_without_leading_hour_zero():
+  assert kst_clock_text_12h(now=0) == "AM 9:00"
+  assert kst_clock_text_12h(now=3 * 60 * 60) == "PM 12:00"
+  assert kst_clock_text_12h(now=5 * 60 * 60 + 24 * 60) == "PM 2:24"
+  assert kst_clock_text_12h(now=15 * 60 * 60 + 5 * 60) == "AM 12:05"
 
 
 def test_ambient_power_gauge_maps_accel_to_signed_fill():

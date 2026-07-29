@@ -202,10 +202,11 @@ Changing either param makes the running HUD exit so `cluster_autorun` can
 relaunch it with the new affinity/priority, without a whole system restart.
 Explicit `CLUSTER_REALTIME`, `CLUSTER_REALTIME_CORES`, or
 `CLUSTER_REALTIME_PRIORITY` environment values still win.
-When `--usb-brightness` is omitted, USB launches follow `ClusterHudBrightness`:
-`0` auto follows live `wideRoadCameraState.exposureValPercent` after samples are
-available, falling back to `deviceState.screenBrightnessPercent`; `1` through
-`100` are fixed brightness percentages.
+When `--usb-brightness` is omitted, USB brightness follows the resolved
+`ClusterHudTheme`: dark uses `30%` and light uses `60%`. Theme mode `0` keeps
+the existing KST auto schedule and therefore changes brightness together with
+the theme. The manual web brightness setting is disabled; `--usb-brightness`
+remains available as a diagnostic override.
 Brightness commands use no-ACK command `14` during USB initialization and when
 the resolved brightness changes.
 

@@ -44,6 +44,7 @@ from cluster_config import (
     WHITE,
     current_cluster_theme,
     kst_clock_text,
+    kst_clock_text_12h,
     normalize_cluster_screen_mode,
     normalize_cluster_theme_mode,
 )
@@ -90,6 +91,7 @@ PRETENDARD_REGULAR_FONT_PATH = OPENPILOT_FONT_DIR / "Pretendard-Regular.ttf"
 PRETENDARD_MEDIUM_FONT_PATH = OPENPILOT_FONT_DIR / "Pretendard-Medium.ttf"
 PRETENDARD_SEMIBOLD_FONT_PATH = OPENPILOT_FONT_DIR / "Pretendard-SemiBold.ttf"
 PRETENDARD_BOLD_FONT_PATH = OPENPILOT_FONT_DIR / "Pretendard-Bold.ttf"
+PRETENDARD_EXTRABOLD_FONT_PATH = OPENPILOT_FONT_DIR / "Pretendard-ExtraBold.ttf"
 PHONE_MEDIA_UNICODE_FONT_PATH = PRETENDARD_BOLD_FONT_PATH
 VEHICLE_MODEL_PATH = CLUSTER_DIR / "assets" / "models" / "cybertruck" / "cybertruck_cluster.obj"
 EGO_VEHICLE_TEXTURE_PATH = SELFDRIVE_DIR / "assets" / "icons_mici" / "ego_vehicle_custom.png"
@@ -1146,7 +1148,7 @@ class ClusterUiRenderer:
 
         profile_stage = self._profile_start()
         rl.begin_texture_mode(upload_target)
-        rl.clear_background(rl_color(self._current_theme().bg))
+        rl.clear_background(rl_color(AMBIENT_BODY_BG))
         source = rl.Rectangle(
             0.0,
             0.0,
@@ -1342,7 +1344,7 @@ class ClusterUiRenderer:
 
             profile_stage = self._profile_start()
             rl.begin_texture_mode(upload_target)
-            rl.clear_background(rl_color(self._current_theme().bg))
+            rl.clear_background(rl_color(AMBIENT_BODY_BG))
             source = rl.Rectangle(
                 0.0,
                 0.0,
@@ -1533,6 +1535,7 @@ class ClusterUiRenderer:
             ("medium", PRETENDARD_MEDIUM_FONT_PATH),
             ("semibold", PRETENDARD_SEMIBOLD_FONT_PATH),
             ("bold", PRETENDARD_BOLD_FONT_PATH),
+            ("extrabold", PRETENDARD_EXTRABOLD_FONT_PATH),
         ):
             if not path.exists():
                 continue
@@ -2592,7 +2595,7 @@ class ClusterUiRenderer:
             self._draw_ambient_speed_limit(state)
             self._draw_plain_text(gear_text, AMBIENT_GEAR_X, AMBIENT_TOP_ROW_Y, AMBIENT_GEAR_SIZE, WHITE, anchor="center")
             self._draw_plain_text(self._cruise_set_speed_text(state), AMBIENT_CRUISE_SPEED_X, AMBIENT_TOP_ROW_Y, AMBIENT_CRUISE_SPEED_SIZE, WHITE)
-            self._draw_plain_text(kst_clock_text(), AMBIENT_CLOCK_RIGHT_X, AMBIENT_CLOCK_Y, AMBIENT_CLOCK_SIZE, (229, 231, 235), anchor="right")
+            self._draw_plain_text(kst_clock_text_12h(), AMBIENT_CLOCK_RIGHT_X, AMBIENT_CLOCK_Y, AMBIENT_CLOCK_SIZE, (229, 231, 235), anchor="right")
         finally:
             rl.rl_pop_matrix()
 
@@ -2755,7 +2758,7 @@ class ClusterUiRenderer:
             AMBIENT_TOP_ROW_Y,
             AMBIENT_SPEED_LIMIT_TEXT_SIZE,
             TEXT,
-            weight="bold",
+            weight="extrabold",
             anchor="center",
         )
 
@@ -2877,8 +2880,7 @@ class ClusterUiRenderer:
             )
 
     def _draw_ambient_clock(self, state: ClusterUiState) -> None:
-        raw_text = kst_clock_text().strip()
-        text = raw_text[:5] if len(raw_text) >= 5 and raw_text[2] == ":" else raw_text
+        text = kst_clock_text_12h()
         self._draw_ambient_text(text, AMBIENT_CLOCK_RIGHT_X, AMBIENT_CLOCK_Y, AMBIENT_CLOCK_SIZE, (229, 231, 235), weight="light", anchor="right")
 
     def _draw_hud(self, state: ClusterUiState, signal_lights: tuple[bool, bool] | None = None) -> None:

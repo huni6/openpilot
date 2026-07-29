@@ -10,7 +10,6 @@ import time
 from pathlib import Path
 
 from cluster_config import (
-    CLUSTER_BRIGHTNESS_PARAM,
     CLUSTER_CAMERA_VIEW_MODE_PARAM,
     CLUSTER_ENCODER_AUTO,
     CLUSTER_ENCODER_HARDWARE,
@@ -34,6 +33,7 @@ from cluster_config import (
     CLUSTER_THEME_PARAM,
     DESIGN_HEIGHT,
     DESIGN_WIDTH,
+    cluster_theme_brightness_percent,
     kst_clock_text,
     normalize_cluster_brightness_percent,
     normalize_cluster_camera_view_mode,
@@ -71,7 +71,6 @@ from cluster_usb_display import TuringUsbDisplay, product_id_for_hud_mode
 from cluster_usb_pipeline import AsyncJpegUsbPipeline
 
 DEFAULT_FPS = 0.0
-DEFAULT_USB_BRIGHTNESS = 80
 DEFAULT_H264_BITRATE = "auto"
 DEFAULT_H264_GOP = 1
 H264_AUTO_BITRATE_BITS_PER_FPS = 234_000
@@ -201,23 +200,22 @@ class ClusterLiveFpsParamReader:
             return 0.0
 
 
-class ClusterHudBrightnessParamReader:
-    def __init__(self) -> None:
-        self._params = None
-        try:
-            from openpilot.common.params import Params
-
-            self._params = Params()
-        except Exception:
-            pass
+class ClusterThemeBrightnessReader:
+    def __init__(self, theme_override: str | None = None) -> None:
+        self._theme_override = (
+            normalize_cluster_theme_mode(theme_override)
+            if theme_override is not None
+            else None
+        )
+        self._theme_reader = ClusterThemeParamReader() if self._theme_override is None else None
 
     def read(self) -> int:
-        if self._params is None:
-            return 0
-        try:
-            return normalize_cluster_brightness_percent(self._params.get_int(CLUSTER_BRIGHTNESS_PARAM))
-        except Exception:
-            return 0
+        theme_mode = (
+            self._theme_override
+            if self._theme_override is not None
+            else (self._theme_reader.read() if self._theme_reader is not None else "auto")
+        )
+        return cluster_theme_brightness_percent(theme_mode)
 
 
 class ClusterScreenModeParamReader:
@@ -441,24 +439,6 @@ def route_overlay_for_mode(overlay: RouteOverlay | None, mode: str) -> RouteOver
     return overlay
 
 
-def resolved_usb_brightness(
-    setting: int,
-    live_source: OpenpilotLiveSource | None,
-    *,
-    auto_enabled: bool,
-) -> int:
-    normalized = normalize_cluster_brightness_percent(setting)
-    if normalized > 0 or not auto_enabled:
-        return normalized
-
-    if live_source is not None:
-        auto_brightness = live_source.screen_brightness_percent()
-        if auto_brightness is not None:
-            return normalize_cluster_brightness_percent(auto_brightness)
-
-    return DEFAULT_USB_BRIGHTNESS
-
-
 def build_rgba_color_test_pattern(width: int, height: int) -> bytearray:
     half_width = max(1, width // 2)
     half_height = max(1, height // 2)
@@ -487,7 +467,7 @@ def run_demo(
     width: int | None,
     height: int | None,
     usb_brightness: int,
-    usb_brightness_param_reader: ClusterHudBrightnessParamReader | None,
+    usb_brightness_reader: ClusterThemeBrightnessReader | None,
     usb_display_fps: int,
     usb_display_fps_auto: bool,
     usb_codec: str,
@@ -569,15 +549,9 @@ def run_demo(
     usb_pipeline: AsyncJpegUsbPipeline | None = None
     h264_pipeline: H264UsbPipeline | None = None
     active_brightness_setting = normalize_cluster_brightness_percent(usb_brightness)
-    usb_brightness_auto_enabled = usb_brightness_param_reader is not None
-    initial_usb_brightness = resolved_usb_brightness(
-        active_brightness_setting,
-        None,
-        auto_enabled=usb_brightness_auto_enabled,
-    )
     if output_mode in ("usb", "both"):
         usb_display = TuringUsbDisplay(
-            brightness=initial_usb_brightness,
+            brightness=active_brightness_setting,
             display_fps=usb_display_fps,
             jpeg_quality=usb_jpeg_quality,
             jpeg_encoder=usb_jpeg_encoder,
@@ -1032,23 +1006,17 @@ def run_demo(
             )
             brightness_now = time.perf_counter()
             if usb_display is not None and brightness_now >= next_brightness_param_read:
-                if usb_brightness_param_reader is not None:
-                    next_brightness_setting = usb_brightness_param_reader.read()
+                if usb_brightness_reader is not None:
+                    next_brightness_setting = usb_brightness_reader.read()
                     if next_brightness_setting != active_brightness_setting:
                         active_brightness_setting = next_brightness_setting
-                        brightness_text = (
-                            "auto"
-                            if active_brightness_setting == 0
-                            else f"{active_brightness_setting}%"
+                        print(
+                            f"{CLUSTER_THEME_PARAM} brightness updated: "
+                            f"{active_brightness_setting}%",
+                            flush=True,
                         )
-                        print(f"{CLUSTER_BRIGHTNESS_PARAM} updated: {brightness_text}", flush=True)
-                next_usb_brightness = resolved_usb_brightness(
-                    active_brightness_setting,
-                    live_source,
-                    auto_enabled=usb_brightness_auto_enabled,
-                )
                 force_brightness_send = brightness_now >= next_brightness_resend
-                if usb_display.set_brightness(next_usb_brightness, force=force_brightness_send):
+                if usb_display.set_brightness(active_brightness_setting, force=force_brightness_send):
                     next_brightness_resend = brightness_now + BRIGHTNESS_RESEND_SECONDS
                 next_brightness_param_read = brightness_now + BRIGHTNESS_PARAM_POLL_SECONDS
 
@@ -1276,8 +1244,8 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=None,
         help=(
-            "Manual TURZX brightness 0-100. When omitted, live USB mode reads "
-            f"{CLUSTER_BRIGHTNESS_PARAM}: 0 auto, 1-100 manual."
+            "Diagnostic TURZX brightness override (0-100). When omitted, brightness follows "
+            f"{CLUSTER_THEME_PARAM}: dark 30%, light 60%, auto switches by KST."
         ),
     )
     parser.add_argument(
@@ -1720,14 +1688,14 @@ def main(*, exit_on_error: bool = True) -> None:
     usb_display_fps_auto = usb_output_enabled and args.usb_display_fps is None and args.usb_codec == "h264"
     usb_h264_bitrate = resolved_usb_h264_bitrate(args.usb_h264_bitrate, target_fps, args.usb_h264_fps)
     usb_h264_bitrate_auto = args.usb_h264_bitrate.strip().lower() == "auto"
-    brightness_param_reader = None
+    brightness_reader = None
     if args.usb_brightness_from_cli:
         usb_brightness = normalize_cluster_brightness_percent(args.usb_brightness)
         brightness_source = "--usb-brightness"
     else:
-        brightness_param_reader = ClusterHudBrightnessParamReader()
-        usb_brightness = brightness_param_reader.read()
-        brightness_source = CLUSTER_BRIGHTNESS_PARAM
+        brightness_reader = ClusterThemeBrightnessReader(args.theme)
+        usb_brightness = brightness_reader.read()
+        brightness_source = f"{CLUSTER_THEME_PARAM}(dark=30%,light=60%)"
     fps_text = "uncapped" if target_fps == 0 else f"{target_fps:.1f} Hz"
     display_fps_text = (
         f"auto->{usb_display_fps}"
@@ -1744,7 +1712,7 @@ def main(*, exit_on_error: bool = True) -> None:
             h264_bitrate_text += " h264_realtime=on"
         if args.usb_h264_diagnose_interval > 0:
             h264_bitrate_text += f" h264_diag={args.usb_h264_diagnose_interval:g}s"
-    brightness_text = "auto" if brightness_param_reader is not None and usb_brightness == 0 else f"{usb_brightness}%"
+    brightness_text = f"{usb_brightness}%"
     size_text = (
         f"{args.width or 'device'}x{args.height or 'device'}"
         if args.output in ("usb", "both")
@@ -1768,7 +1736,7 @@ def main(*, exit_on_error: bool = True) -> None:
             args.width,
             args.height,
             usb_brightness,
-            brightness_param_reader,
+            brightness_reader,
             usb_display_fps,
             usb_display_fps_auto,
             args.usb_codec,

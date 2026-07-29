@@ -48,13 +48,14 @@ class ClusterTheme:
 CLUSTER_THEME_AUTO = 0
 CLUSTER_THEME_DARK = 1
 CLUSTER_THEME_LIGHT = 2
+CLUSTER_DARK_BRIGHTNESS_PERCENT = 30
+CLUSTER_LIGHT_BRIGHTNESS_PERCENT = 60
 CLUSTER_ENCODER_AUTO = 0
 CLUSTER_ENCODER_JPEG = 1
 CLUSTER_ENCODER_HARDWARE = 2
 CLUSTER_ENCODER_SOFTWARE = 3
 CLUSTER_HUD_PARAM = "ClusterHud"
 CLUSTER_HUD_DEBUG_PARAM = "ClusterHudDebug"
-CLUSTER_BRIGHTNESS_PARAM = "ClusterHudBrightness"
 CLUSTER_ENCODER_PARAM = "ClusterHudEncoder"
 CLUSTER_CORE_MODE_PARAM = "ClusterHudCoreMode"
 CLUSTER_PRIORITY_PARAM = "ClusterHudPriority"
@@ -448,6 +449,14 @@ def kst_time_tuple(now: float | None = None) -> time.struct_time:
     return time.gmtime(timestamp + KST_OFFSET_SECONDS)
 
 
+def kst_clock_text_12h(*, include_seconds: bool = False, now: float | None = None) -> str:
+    local_time = kst_time_tuple(now)
+    period = "AM" if local_time.tm_hour < 12 else "PM"
+    hour = local_time.tm_hour % 12 or 12
+    seconds = f":{local_time.tm_sec:02d}" if include_seconds else ""
+    return f"{period} {hour}:{local_time.tm_min:02d}{seconds}"
+
+
 def current_cluster_theme(mode: object = "auto", now: float | None = None) -> ClusterTheme:
     normalized = normalize_cluster_theme_mode(mode)
     if normalized == "dark":
@@ -459,6 +468,11 @@ def current_cluster_theme(mode: object = "auto", now: float | None = None) -> Cl
     if local_hour >= AUTO_DARK_START_HOUR or local_hour < AUTO_LIGHT_START_HOUR:
         return DARK_CLUSTER_THEME
     return LIGHT_CLUSTER_THEME
+
+
+def cluster_theme_brightness_percent(mode: object = "auto", now: float | None = None) -> int:
+    theme = current_cluster_theme(mode, now)
+    return CLUSTER_DARK_BRIGHTNESS_PERCENT if theme.is_dark else CLUSTER_LIGHT_BRIGHTNESS_PERCENT
 
 
 BG = LIGHT_CLUSTER_THEME.bg

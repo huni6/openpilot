@@ -486,7 +486,6 @@
               "zh": "基本",
               "params": [
                 "ClusterHud",
-                "ClusterHudBrightness",
                 "ClusterHudTheme"
               ]
             },
@@ -2926,22 +2925,6 @@
       "cdescr": "0: Onroad only\n1: Always\n2: Always + UI\n3: Always + Navi",
       "min": 0,
       "max": 3,
-      "default": 0,
-      "unit": 1
-    },
-    {
-      "group": "외부 HUD",
-      "name": "ClusterHudBrightness",
-      "title": "외부 HUD 밝기(0)",
-      "descr": "0: 자동\n1~100: 밝기",
-      "egroup": "CLUSTER HUD",
-      "etitle": "External HUD Brightness(0)",
-      "edescr": "0: Auto\n1-100: Brightness",
-      "cgroup": "外部 HUD",
-      "ctitle": "外部 HUD 亮度(0)",
-      "cdescr": "0: 自动\n1-100: 亮度",
-      "min": 0,
-      "max": 100,
       "default": 0,
       "unit": 1
     },
