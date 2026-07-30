@@ -14,13 +14,13 @@ from selfdrive.carrot.cluster.cluster_layout import (
 
 def test_cluster_theme_brightness_uses_fixed_dark_and_light_levels():
   assert cluster_theme_brightness_percent("dark") == 30
-  assert cluster_theme_brightness_percent("light") == 80
+  assert cluster_theme_brightness_percent("light") == 60
 
 
 def test_cluster_theme_brightness_auto_switches_on_kst_schedule():
   assert cluster_theme_brightness_percent("auto", 1_767_301_140) == 30  # 2026-01-02 05:59 KST
-  assert cluster_theme_brightness_percent("auto", 1_767_301_200) == 80  # 2026-01-02 06:00 KST
-  assert cluster_theme_brightness_percent("auto", 1_767_344_340) == 80  # 2026-01-02 17:59 KST
+  assert cluster_theme_brightness_percent("auto", 1_767_301_200) == 60  # 2026-01-02 06:00 KST
+  assert cluster_theme_brightness_percent("auto", 1_767_344_340) == 60  # 2026-01-02 17:59 KST
   assert cluster_theme_brightness_percent("auto", 1_767_344_400) == 30  # 2026-01-02 18:00 KST
 
 

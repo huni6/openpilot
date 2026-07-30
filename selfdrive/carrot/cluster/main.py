@@ -1245,7 +1245,7 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help=(
             "Diagnostic TURZX brightness override (0-100). When omitted, brightness follows "
-            f"{CLUSTER_THEME_PARAM}: dark 30%, light 80%, auto switches by KST."
+            f"{CLUSTER_THEME_PARAM}: dark 30%, light 60%, auto switches by KST."
         ),
     )
     parser.add_argument(
@@ -1695,7 +1695,7 @@ def main(*, exit_on_error: bool = True) -> None:
     else:
         brightness_reader = ClusterThemeBrightnessReader(args.theme)
         usb_brightness = brightness_reader.read()
-        brightness_source = f"{CLUSTER_THEME_PARAM}(dark=30%,light=80%)"
+        brightness_source = f"{CLUSTER_THEME_PARAM}(dark=30%,light=60%)"
     fps_text = "uncapped" if target_fps == 0 else f"{target_fps:.1f} Hz"
     display_fps_text = (
         f"auto->{usb_display_fps}"

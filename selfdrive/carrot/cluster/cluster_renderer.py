@@ -185,9 +185,11 @@ AMBIENT_CLOCK_Y = 62.5
 AMBIENT_CLOCK_SIZE = 50.0
 AMBIENT_BSM_W = 210.0
 AMBIENT_BSM_DARK_COLOR = (204, 88, 0)
-AMBIENT_BSM_LIGHT_COLOR = (255, 98, 0)
-AMBIENT_BSM_EDGE_ALPHA = 190.0
-AMBIENT_BSM_CORE_ALPHA = 90.0
+AMBIENT_BSM_LIGHT_COLOR = (255, 112, 0)
+AMBIENT_BSM_DARK_EDGE_ALPHA = 190.0
+AMBIENT_BSM_DARK_CORE_ALPHA = 90.0
+AMBIENT_BSM_LIGHT_EDGE_ALPHA = 235.0
+AMBIENT_BSM_LIGHT_CORE_ALPHA = 125.0
 AMBIENT_BSM_FADE_SECONDS = 0.35
 AMBIENT_LFA_ACTIVE_COLOR = (46, 192, 79)
 AMBIENT_LFA_INACTIVE_COLOR = (126, 135, 148)
@@ -2600,7 +2602,14 @@ class ClusterUiRenderer:
 
     def _draw_ambient_bsm_edges(self, state: ClusterUiState) -> None:
         left_active, right_active = ambient_bsm_edges(state.left_blindspot, state.right_blindspot)
-        color = AMBIENT_BSM_DARK_COLOR if self._current_theme().is_dark else AMBIENT_BSM_LIGHT_COLOR
+        if self._current_theme().is_dark:
+            color = AMBIENT_BSM_DARK_COLOR
+            edge_alpha = AMBIENT_BSM_DARK_EDGE_ALPHA
+            core_alpha = AMBIENT_BSM_DARK_CORE_ALPHA
+        else:
+            color = AMBIENT_BSM_LIGHT_COLOR
+            edge_alpha = AMBIENT_BSM_LIGHT_EDGE_ALPHA
+            core_alpha = AMBIENT_BSM_LIGHT_CORE_ALPHA
         now = time.monotonic()
         elapsed = 1.0 / 30.0 if self._ambient_bsm_updated_at is None else now - self._ambient_bsm_updated_at
         self._ambient_bsm_updated_at = now
@@ -2611,11 +2620,22 @@ class ClusterUiRenderer:
             self._ambient_bsm_right_opacity, right_active, elapsed, AMBIENT_BSM_FADE_SECONDS
         )
         if self._ambient_bsm_left_opacity > 0.0:
-            self._draw_ambient_bsm_edge("left", self._ambient_bsm_left_opacity, color)
+            self._draw_ambient_bsm_edge(
+                "left", self._ambient_bsm_left_opacity, color, edge_alpha, core_alpha
+            )
         if self._ambient_bsm_right_opacity > 0.0:
-            self._draw_ambient_bsm_edge("right", self._ambient_bsm_right_opacity, color)
+            self._draw_ambient_bsm_edge(
+                "right", self._ambient_bsm_right_opacity, color, edge_alpha, core_alpha
+            )
 
-    def _draw_ambient_bsm_edge(self, side: str, opacity: float, color: tuple[int, int, int]) -> None:
+    def _draw_ambient_bsm_edge(
+        self,
+        side: str,
+        opacity: float,
+        color: tuple[int, int, int],
+        edge_alpha: float,
+        core_alpha: float,
+    ) -> None:
         steps = max(1, int(round(AMBIENT_BSM_W / 3.0)))
         step_w = AMBIENT_BSM_W / float(steps)
         for index in range(steps):
@@ -2623,9 +2643,9 @@ class ClusterUiRenderer:
             t1 = (index + 1) / float(steps)
             t = (t0 + t1) * 0.5
             if t <= 0.25:
-                alpha = AMBIENT_BSM_EDGE_ALPHA - (t / 0.25) * (AMBIENT_BSM_EDGE_ALPHA - AMBIENT_BSM_CORE_ALPHA)
+                alpha = edge_alpha - (t / 0.25) * (edge_alpha - core_alpha)
             else:
-                alpha = AMBIENT_BSM_CORE_ALPHA * pow(max(0.0, 1.0 - (t - 0.25) / 0.75), 0.9)
+                alpha = core_alpha * pow(max(0.0, 1.0 - (t - 0.25) / 0.75), 0.9)
             alpha *= opacity
             if alpha <= 0.0:
                 continue
