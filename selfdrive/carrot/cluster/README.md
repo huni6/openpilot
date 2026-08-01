@@ -203,7 +203,7 @@ relaunch it with the new affinity/priority, without a whole system restart.
 Explicit `CLUSTER_REALTIME`, `CLUSTER_REALTIME_CORES`, or
 `CLUSTER_REALTIME_PRIORITY` environment values still win.
 When `--usb-brightness` is omitted, USB brightness follows the resolved
-`ClusterHudTheme`: dark uses `30%` and light uses `60%`. Theme mode `0` keeps
+`ClusterHudTheme`: dark uses `20%` and light uses `60%`. Theme mode `0` keeps
 the existing KST auto schedule and therefore changes brightness together with
 the theme. The manual web brightness setting is disabled; `--usb-brightness`
 remains available as a diagnostic override.
