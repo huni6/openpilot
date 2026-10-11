@@ -6,6 +6,7 @@ from collections.abc import Callable
 from enum import Enum
 from cereal import messaging, car, log
 from openpilot.common.filter_simple import FirstOrderFilter
+from openpilot.common.jetlink_status import display_status as read_jetlink_status
 from openpilot.common.params import Params
 from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.ui.lib.prime_state import PrimeState
@@ -87,6 +88,10 @@ class UIState:
     self.CP: car.CarParams | None = None
     self.light_sensor: float = -1.0
     self._param_update_time: float = 0.0
+    self.jetlink_badge: tuple[str, str] | None = None
+    self.jetlink_detail: str = ''
+    self.jetlink_detail_since: float = 0.
+    self._jetlink_update_time: float = float('-inf')
 
     # Callbacks
     self._offroad_transition_callbacks: list[Callable[[], None]] = []
@@ -119,9 +124,24 @@ class UIState:
     self.sm.update(0)
     self._update_state()
     self._update_status()
+    self._update_jetlink_status()
     if time.monotonic() - self._param_update_time > 5.0:
       self.update_params()
     device.update()
+
+  def _update_jetlink_status(self) -> None:
+    now = time.monotonic()
+    if now - self._jetlink_update_time < 0.25:
+      return
+    self._jetlink_update_time = now
+    try:
+      badge, detail = read_jetlink_status()
+    except (OSError, ValueError, TypeError, KeyError, OverflowError):
+      # Optional accelerator diagnostics must not interrupt the driving UI.
+      badge, detail = None, ''
+    if (badge, detail) != (self.jetlink_badge, self.jetlink_detail):
+      self.jetlink_detail_since = now
+    self.jetlink_badge, self.jetlink_detail = badge, detail
 
   def _update_state(self) -> None:
     # Handle panda states updates

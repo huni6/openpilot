@@ -4,6 +4,7 @@ import pyray as rl
 from dataclasses import dataclass
 from openpilot.common.constants import CV
 from openpilot.selfdrive.ui.onroad.exp_button import ExpButton
+from openpilot.selfdrive.ui.onroad.jetlink_badge import draw_jetlink_badge, draw_jetlink_detail
 from openpilot.selfdrive.ui.ui_state import ui_state, UIStatus
 from openpilot.system.ui.lib.application import gui_app, FontWeight
 from openpilot.system.ui.lib.multilang import tr
@@ -221,6 +222,12 @@ class HudRenderer(Widget):
     self._plot_renderer.draw(rect, self._font_display)
     self._draw_date_time(rect)
     self._draw_tpms_top_right(rect)
+    badge_right = button_x - 24
+    draw_jetlink_badge(ui_state.jetlink_badge, rl.Rectangle(rect.x + 350, rect.y + 24,
+                      badge_right - rect.x - 350, 66), 38)
+    detail_width = min(780, badge_right - rect.x - 350)
+    draw_jetlink_detail(ui_state.jetlink_detail, rl.Rectangle(badge_right - detail_width, rect.y + 100, detail_width, 150),
+                       26, time.monotonic() - ui_state.jetlink_detail_since)
 
   def user_interacting(self) -> bool:
     return self._exp_button.is_pressed

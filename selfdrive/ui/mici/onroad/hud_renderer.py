@@ -7,6 +7,7 @@ from typing import Optional
 from openpilot.common.constants import CV
 # from openpilot.selfdrive.ui.mici.onroad.torque_bar import TorqueBar # 아이콘에 토크 적용: 토크바 미사용
 from openpilot.selfdrive.ui.mici.onroad import blend_colors
+from openpilot.selfdrive.ui.onroad.jetlink_badge import draw_jetlink_badge, draw_jetlink_detail
 from openpilot.selfdrive.ui.ui_state import ui_state, UIStatus
 from openpilot.system.ui.lib.application import gui_app, FontWeight
 from openpilot.system.ui.lib.multilang import tr
@@ -282,6 +283,16 @@ class HudRenderer(Widget):
     self._draw_set_speed(rect)
 
     self._draw_steering_wheel(rect)
+    if self._can_draw_top_icons:
+      # Keep the clock, traffic countdown and speed/gear panel unobstructed.
+      if ui_state.jetlink_detail:
+        draw_jetlink_badge(ui_state.jetlink_badge, rl.Rectangle(rect.x + rect.width - 96, rect.y + rect.height - 114, 90, 42),
+                          13, stacked=True)
+        draw_jetlink_detail(ui_state.jetlink_detail, rl.Rectangle(rect.x + rect.width - 96, rect.y + rect.height - 70, 90, 52),
+                           10, time.monotonic() - ui_state.jetlink_detail_since)
+      else:
+        draw_jetlink_badge(ui_state.jetlink_badge, rl.Rectangle(rect.x + rect.width - 96, rect.y + rect.height - 76, 90, 58),
+                          18, stacked=True)
 
   def _draw_steering_wheel(self, rect: rl.Rectangle) -> None:
     wheel_txt = self._txt_wheel_critical if self._show_wheel_critical else self._txt_wheel

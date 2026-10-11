@@ -175,6 +175,32 @@ power-loss recovery has not been hardware-tested.
 
 ## Validation and Diagnosis
 
+The comma onroad UI displays the existing Jetlink status on both UI variants:
+upper right on comma 3/3X, beside the gear indicator on comma 4. The compact
+badge is hidden while a driving alert is displayed.
+
+- Yellow `jetSON WAIT`: connecting or loading (`Jetlink WAIT` before peer identity).
+- White `jetSON READY`: the host is ready, but modeld is not using it yet.
+- Green `jetSON`: modeld reports active remote inference.
+- Red `jetSON ERROR`: a reported model/link/health fault or stale link status.
+- Yellow `jetSON HOT` / `jetSON DATA?`: a health warning / missing current health data.
+- No badge: no host has been detected, or a fresh waiting report confirms absence
+  with no active model or model failure.
+
+These are inference-link indicators, not confirmation that TURZX received or
+displayed a frame. The UI polls status every 250 ms; malformed or missing status
+files must not crash the driving UI. Use the separate HUD heartbeat below for
+display-transport diagnosis.
+
+WAIT/ERROR also show the reported preparation stage/progress/message, model
+error, link error or host-health reason. Badge and explanation use the same
+snapshot; stale historical errors are not presented as current causes. When
+there is no specific message, the UI states the observed phase or missing/stale
+status rather than guessing a cable or power fault. Long explanations wrap and
+cycle through pages every four seconds, restarting only when the status changes.
+READY/active clears the explanation. On comma 4 the details stay in the narrow
+column beside the gear indicator and are hidden along with the badge for alerts.
+
 ```sh
 # comma
 cat /dev/shm/carrot-jetlink.json
@@ -206,6 +232,7 @@ Local regression commands (run with the repository's Python dependencies):
 PYTHONPATH=.:tools/jetlink python3 -m pytest --confcutdir=tools/jetlink -o addopts='' tools/jetlink -q
 PYTHONPATH=. python3 -m pytest --basetemp=/tmp/hl-model-tests --confcutdir=selfdrive/modeld/tests \
   -o addopts='' selfdrive/modeld/tests -q
+PYTHONPATH=. python3 -m pytest --confcutdir=selfdrive/ui/tests -o addopts='' selfdrive/ui/tests/test_jetlink_badge.py -q
 PYTHONPATH=.:tools/jetlink python3 tools/jetlink/preview_cluster.py tools/jetlink/dist/preview
 ```
 

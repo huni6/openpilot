@@ -56,9 +56,8 @@ def host_label(peer, mode='usb'):
   return 'Jetlink'
 
 
-def _fresh(path, now):
+def _fresh(value, now):
   try:
-    value = _read(path)
     if isinstance(value, dict) and 0 <= now - value['updated'] < 3:
       return value
   except (OSError, ValueError, KeyError, TypeError):
@@ -68,10 +67,16 @@ def _fresh(path, now):
 
 def diagnostics():
   """Only current telemetry can report health or an address; HELLO is identity."""
+  return _diagnostics(*_snapshot())
+
+
+def _snapshot():
   now = time.monotonic()
   saved = _read(LINK_STATUS)
-  link = _fresh(LINK_STATUS, now)
-  model = _fresh(MODEL_STATUS, now)
+  return now, saved, _fresh(saved, now), _fresh(_read(MODEL_STATUS), now)
+
+
+def _diagnostics(now, saved, link, model):
   if not saved.get('peer') and saved.get('state') not in ('connecting', 'loading', 'retrying', 'blocked') and not model.get('active'):
     return None
   result = {'label': host_label(saved.get('peer'), saved.get('transport', 'usb')), 'state': link.get('state', 'disconnected'),
@@ -122,13 +127,21 @@ def diagnostics():
 
 
 def badge():
-  now = time.monotonic()
-  link = _fresh(LINK_STATUS, now)
-  model = _fresh(MODEL_STATUS, now)
+  return display_status()[0]
+
+
+def display_status():
+  """Badge and explanation from one snapshot, without changing the badge API."""
+  now, saved, link, model = _snapshot()
+  health = _diagnostics(now, saved, link, model)
+  status = _badge(link, model, health)
+  return status, _detail(status, link, model, health)
+
+
+def _badge(link, model, health):
   label = host_label(link.get('peer'), link.get('transport', 'usb'))
   if link.get('state') == 'updating' and label == 'jetSON':
     return update_badge(link.get('host_update') or {})
-  health = diagnostics()
   if health:
     label = health['label']
     if health['state'] == 'waiting' and health['severity'] == 'unknown':
@@ -149,3 +162,54 @@ def badge():
   if state == 'retrying':
     return f'{label} RETRY', 'error'
   return None
+
+
+def _text(value, limit=300):
+  if not isinstance(value, str):
+    return ''
+  return ' '.join(''.join(c if c.isprintable() else ' ' for c in value[:limit]).split())
+
+
+def _detail(status, link, model, health):
+  if status is None or status[1] not in ('loading', 'error'):
+    return ''
+  model_error = _text(model.get('error')) if not model.get('active') else ''
+  if not link:
+    prefix = f'Model: {model_error} | ' if model_error else ''
+    return prefix + 'Link status missing or stale (3s timeout); current connection cannot be confirmed.'
+
+  if status[1] == 'error':
+    reasons = []
+    seen = set()
+    for source, raw in (('Model', model_error),
+                        ('Link', link.get('error')),
+                        ('Host', health.get('reason') if health and health.get('fresh') else '')):
+      message = _text(raw)
+      if message and message not in seen:
+        reasons.append(f'{source}: {message}')
+        seen.add(message)
+    if reasons:
+      return ' | '.join(reasons)
+    if health and health.get('fresh') and health.get('severity') == 'error':
+      return 'Host health error; no details reported.'
+    return f"Link state: {_text(link.get('state')) or 'unknown'}; no detailed error was reported."
+
+  if status[0].endswith(' DATA?'):
+    return 'Host health data missing, stale or unknown; current health cannot be confirmed.'
+  if status[0].endswith(' HOT'):
+    reason = _text(health.get('reason')) if health else ''
+    return f'Host: {reason}' if reason else 'Host health warning; no details reported.'
+
+  preparation = link.get('preparation')
+  if isinstance(preparation, dict):
+    stage = _text(preparation.get('stage'), 60)
+    message = _text(preparation.get('message'))
+    fraction = preparation.get('fraction')
+    progress = f' {int(fraction * 100)}%' if isinstance(fraction, (int, float)) and 0 <= fraction <= 1 else ''
+    if stage or message or progress:
+      return f'{stage or "Preparation"}{progress}' + (f': {message}' if message else '')
+  if link.get('state') == 'connecting':
+    return 'Connecting to host; handshake not complete.'
+  if link.get('state') == 'loading':
+    return 'Model preparation in progress (load / warm-up).'
+  return _text(health.get('reason')) if health else 'Waiting; no further details reported.'
