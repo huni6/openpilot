@@ -1245,7 +1245,7 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help=(
             "Diagnostic TURZX brightness override (0-100). When omitted, brightness follows "
-            f"{CLUSTER_THEME_PARAM}: dark 20%, light 60%, auto switches by KST."
+            f"{CLUSTER_THEME_PARAM}: dark 20%%, light 60%%, auto switches by KST."
         ),
     )
     parser.add_argument(

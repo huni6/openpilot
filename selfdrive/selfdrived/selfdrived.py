@@ -162,6 +162,9 @@ class SelfdriveD:
     """Compute onroadEvents from carState"""
 
     self.events.clear()
+    from openpilot.selfdrive.modeld.jetlink.link import fault_active
+    if fault_active():
+      self.events.add(EventName.commIssue)
 
     if self.sm['controlsState'].lateralControlState.which() == 'debugState':
       self.events.add(EventName.joystickDebug)

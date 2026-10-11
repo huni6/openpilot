@@ -1,0 +1,104 @@
+import hashlib
+import io
+import json
+import subprocess
+import sys
+import tarfile
+from pathlib import Path
+
+import pytest
+
+import install_cluster as installer
+
+
+def bundle_at(tmp_path):
+  guard = Path(__file__).with_name('update_guard.py').read_bytes()
+  files = {'tools/jetlink/server.py': b'# custom', 'tools/jetlink/update_guard.py': guard}
+  sums = {name: hashlib.sha256(data).hexdigest() for name, data in files.items()}
+  identity = hashlib.sha256(json.dumps(sums, sort_keys=True).encode()).hexdigest()
+  files['HL_CLUSTER_MANIFEST.json'] = json.dumps(dict(format=1, branch='cluster_jetson', files=sums,
+                                                    content_sha256=identity)).encode()
+  bundle = tmp_path / 'bundle.tar.gz'
+  with tarfile.open(bundle, 'w:gz') as archive:
+    for name, data in files.items():
+      member = tarfile.TarInfo(name)
+      member.size = len(data)
+      archive.addfile(member, io.BytesIO(data))
+  return bundle, hashlib.sha256(bundle.read_bytes()).hexdigest()
+
+
+def runtime_at(tmp_path):
+  root = tmp_path / 'runtime'
+  old = root / 'releases/original'
+  old.mkdir(parents=True)
+  for name in ('SOURCE_COMMIT', 'tools/jetlink/server.py', 'tools/jetlink/hud.py', 'tools/jetlink/probe_release.py'):
+    path = old / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text('original')
+  for name in ('venv/bin/python', 'cache/last-loaded.json', 'updater/update_host.py'):
+    path = root / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text('original')
+  (root / 'current').symlink_to('releases/original')
+  return root
+
+
+def test_install_preserves_image_engine_and_original_then_rollback(tmp_path, monkeypatch):
+  monkeypatch.setattr(installer.os, 'sync', lambda: None)
+  runtime = runtime_at(tmp_path)
+  bundle, digest = bundle_at(tmp_path)
+  inspected = []
+  target = installer.install(runtime, bundle, digest, lambda candidate: inspected.append(candidate))
+  assert inspected and (runtime / 'current').resolve() == target
+  assert (runtime / 'current/tools/jetlink/server.py').read_text() == '# custom'
+  assert (runtime / 'releases/original/tools/jetlink/server.py').read_text() == 'original'
+  assert (runtime / 'cache/last-loaded.json').read_text() == 'original'
+  assert (runtime / 'HL_CLUSTER_PIN.json').exists()
+  result = subprocess.run([sys.executable, str(runtime / 'updater/update_host.py'), 'activate'], capture_output=True, text=True)
+  assert result.returncode == 0 and 'pinned' in result.stdout
+  installer.rollback(runtime)
+  assert (runtime / 'current').resolve() == runtime / 'releases/original'
+  assert (runtime / 'updater/update_host.py').read_text() == 'original'
+  assert not (runtime / 'HL_CLUSTER_PIN.json').exists()
+  assert target.exists()
+
+
+def test_failed_probe_leaves_selection_and_updater_intact(tmp_path, monkeypatch):
+  runtime = runtime_at(tmp_path)
+  bundle, digest = bundle_at(tmp_path)
+  def fail(candidate):
+    raise RuntimeError('engine failed')
+  with pytest.raises(RuntimeError, match='engine failed'):
+    installer.install(runtime, bundle, digest, fail)
+  assert (runtime / 'current').resolve() == runtime / 'releases/original'
+  assert (runtime / 'updater/update_host.py').read_text() == 'original'
+  assert not (runtime / 'HL_CLUSTER_PIN.json').exists()
+
+
+def test_wrong_digest_and_archive_traversal_rejected(tmp_path):
+  bundle, _ = bundle_at(tmp_path)
+  target = tmp_path / 'out'
+  target.mkdir()
+  with pytest.raises(ValueError, match='SHA256'):
+    installer.extract_verified(bundle, target, '0' * 64)
+  with tarfile.open(bundle, 'w:gz') as archive:
+    member = tarfile.TarInfo('../escape')
+    member.size = 1
+    archive.addfile(member, io.BytesIO(b'x'))
+  digest = hashlib.sha256(bundle.read_bytes()).hexdigest()
+  with pytest.raises(ValueError, match='Unsafe'):
+    installer.extract_verified(bundle, target, digest)
+  assert not (tmp_path / 'escape').exists()
+
+
+def test_boot_gate_and_pending_transaction_require_explicit_recovery(tmp_path):
+  runtime = runtime_at(tmp_path)
+  marker = runtime / 'boot-update-required'
+  marker.touch()
+  with pytest.raises(ValueError, match='Boot-gated'):
+    installer.check(runtime)
+  marker.unlink()
+  (runtime / 'updates').mkdir()
+  (runtime / 'updates/transaction.json').write_text('{}')
+  with pytest.raises(ValueError, match='transaction'):
+    installer.check(runtime)

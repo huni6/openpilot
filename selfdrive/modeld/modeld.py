@@ -201,11 +201,17 @@ def main(demo=False):
   st = time.monotonic()
   cloudlog.warning("loading model")
   model = ModelState(vipc_client_main.width, vipc_client_main.height, USBGPU)
+  if not USBGPU and os.path.isfile('/AGNOS'):
+    try:
+      from openpilot.selfdrive.modeld.jetlink.model import JoiningModel
+      model = JoiningModel(model, vipc_client_main.width, vipc_client_main.height)
+    except Exception:
+      cloudlog.exception('Jetlink adapter unavailable; retaining internal model')
   cloudlog.warning(f"models loaded in {time.monotonic() - st:.1f}s, modeld starting")
 
   # messaging
   pm = PubMaster(["modelV2", "drivingModelData", "cameraOdometry"])
-  sm = SubMaster(["deviceState", "carState", "roadCameraState", "liveCalibration", "driverMonitoringState", "carControl", "liveDelay", "carrotMan", "radarState"])
+  sm = SubMaster(["deviceState", "carState", "selfdriveState", "roadCameraState", "liveCalibration", "driverMonitoringState", "carControl", "liveDelay", "carrotMan", "radarState"])
 
   publish_state = PublishState()
   params = Params()
@@ -338,6 +344,8 @@ def main(demo=False):
     }
 
     mt1 = time.perf_counter()
+    if hasattr(model, 'update'):
+      model.update(sm, meta_main)
     model_output = model.run(bufs, transforms, inputs, prepare_only)
     mt2 = time.perf_counter()
     model_execution_time = mt2 - mt1
