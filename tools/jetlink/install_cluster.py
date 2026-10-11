@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import tarfile
 import tempfile
+import uuid
 
 RUNTIME = Path('/opt/carrot-jetlink')
 SERVICES = ('carrot-jetlink-hud.service', 'carrot-jetlink.service')
@@ -125,7 +126,9 @@ def install(runtime, bundle, expected_sha256, probe):
         atomic_bytes(remembered, original_model)
     target = runtime / 'releases' / ('hl-' + manifest['content_sha256'][:20])
     if target.exists():
-      raise ValueError('Candidate release already exists; it has not been overwritten')
+      # Rollback retains releases. Reinstall from the freshly probed candidate,
+      # never reuse or overwrite a retained runtime that may have been modified.
+      target = target.with_name(target.name + '-' + uuid.uuid4().hex)
     candidate.rename(target)
   atomic_bytes(backup, updater.read_bytes())
   atomic_bytes(updater, (target / 'tools/jetlink/update_guard.py').read_bytes())

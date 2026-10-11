@@ -75,6 +75,26 @@ def test_failed_probe_leaves_selection_and_updater_intact(tmp_path, monkeypatch)
   assert not (runtime / 'HL_CLUSTER_PIN.json').exists()
 
 
+def test_same_bundle_reinstall_after_rollback_preserves_retained_release(tmp_path, monkeypatch):
+  monkeypatch.setattr(installer.os, 'sync', lambda: None)
+  runtime = runtime_at(tmp_path)
+  bundle, digest = bundle_at(tmp_path)
+  probes = []
+  first = installer.install(runtime, bundle, digest, probes.append)
+  installer.rollback(runtime)
+  (first / 'tools/jetlink/server.py').write_text('# retained local change')
+  second = installer.install(runtime, bundle, digest, probes.append)
+  assert len(probes) == 2
+  assert first != second
+  assert (runtime / 'current').resolve() == second
+  assert (second / 'tools/jetlink/server.py').read_text() == '# custom'
+  assert (first / 'tools/jetlink/server.py').read_text() == '# retained local change'
+  installer.rollback(runtime)
+  assert (runtime / 'current').resolve() == runtime / 'releases/original'
+  assert (runtime / 'updater/update_host.py').read_text() == 'original'
+  assert first.exists() and second.exists()
+
+
 def test_wrong_digest_and_archive_traversal_rejected(tmp_path):
   bundle, _ = bundle_at(tmp_path)
   target = tmp_path / 'out'

@@ -146,7 +146,9 @@ The installer:
    lock, Wi-Fi provisioning, protected DATA mount and recovery boot display.
 
 The installer deliberately refuses to overwrite an already pinned installation.
-For another overlay, rollback first, then install the next verified bundle.
+For another overlay, rollback first, then install the verified bundle. Reinstalling
+the same bundle after rollback creates a fresh, probed release and preserves the
+previously retained copy without reusing or overwriting it.
 Do not manually delete the pin or change `current`.
 
 On comma, install `cluster_jetson`, reboot offroad, keep Jetlink transport `usb`
