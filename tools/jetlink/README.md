@@ -55,6 +55,28 @@ comma cameras -> QCOM image warp -> Jetlink USB -> Jetson TensorRT
   corner-radar debug parsing is disabled in this display producer. The ambient
   BSM indicators still use carState's existing left/right blindspot values.
 
+## Follow Comma Wi-Fi
+
+The existing `carrot_wifi_v1` USB channel sends comma's saved client networks,
+with its currently connected Wi-Fi first and marked active. The installed
+carrot-jetson Wi-Fi worker imports them and attempts that active network before
+fallbacks, even if Jetson is already connected to an administrator-added Wi-Fi.
+No SSH pairing or Internet connection is needed for this USB provisioning.
+
+- Comma refreshes the list every 30 seconds; Jetson checks about every 30 seconds.
+  A changed Wi-Fi can therefore take about a minute plus association/DHCP time.
+- Personal WPA/WPA2-PSK, WPA3-SAE and open client profiles are supported. Comma's
+  own hotspot/AP profile and enterprise authentication are not exported.
+- Unreadable inactive profiles are skipped. If the current client's credentials
+  cannot be read, no replacement is published until a successful retry.
+- Passwords use only the private USB channel and root-private NetworkManager
+  storage, never HUD snapshots or diagnostic logs. Physical attachment grants
+  the connected Jetson access to these saved client credentials.
+- Jetson's protected-storage helper persists successfully applied profiles.
+  Manually added Wi-Fi and Ethernet profiles are preserved. Unavailable Wi-Fi
+  may fall back to another saved network; the same network still needs to be
+  reachable by Jetson, and hotspot client isolation can prevent peer SSH.
+
 ## Build the Host Overlay
 
 On a machine with this checkout and Python 3.10 or newer:
@@ -70,6 +92,34 @@ SHA256, the base commit, and a content ID, including any working-tree edits.
 The `.sha256` file contains the digest needed by the installer.
 
 ## Install on the Intended Jetson
+
+### Paired Comma Maintenance
+
+For a recipient who cannot repeatedly bring the SSD back, the opt-in LAN SSH
+maintenance path pairs a device-specific comma key with the intended Jetson.
+An opt-in USB management network is now the first choice, with LAN as fallback;
+see [USB-first remote access](REMOTE_ACCESS.md). Its physical composite-gadget
+compatibility still needs verification on the intended comma.
+The user does not handle keys during routine updates. After the field checklist
+passes and `auto on --confirm-field-checks` is explicitly set, new committed `cluster_jetson` sources
+can be synced from comma during verified offroad periods. This is not keyless
+authentication. Tailscale is installed and enrolled separately on comma only.
+
+Read [the complete field checklist](MEETING_CHECKLIST.md) before first enrollment.
+It includes Mac SSD preparation, host-key verification, manual sync, real display
+checks, rollback/cancellation rehearsal, and only then automatic enrollment.
+No connected development Jetson is used by the build/tests.
+
+```sh
+python3 tools/jetlink/build_meeting_kit.py tools/jetlink/dist/HL-Cluster-Meeting-Kit.zip
+```
+
+The kit contains no keys, Wi-Fi settings or device addresses. Its management
+client belongs in the matching comma checkout, not as a standalone Mac daemon.
+Mac SSD preparation only registers public keys; the booted devices are still
+required for pairing, installation and verification. Existing Windows/manual
+installation remains supported. Old Windows rollback restores upstream; the new
+maintenance rollback restores the previously selected version.
 
 ### Windows Helper
 

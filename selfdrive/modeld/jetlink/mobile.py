@@ -12,7 +12,8 @@ Daemon API:
 Never call send/recv on the ep0 owner in iOS mode: that would open bulk endpoints.
 Keep the cable alive across accept timeouts; recreate it after a UDC rebind (the
 kernel may assign a new netdev). close() deliberately does not close the owner.
-USB/android retain the original setup_gadget.sh and do not create a listener.
+USB/android retain setup_gadget.sh and do not create a listener. Explicit USB
+mode can add the opted-in management NCM function; Android remains bulk-only.
 Android's explicit speed policy belongs to the daemon, not this transport.
 HELLO backend/device fields are peer assertions, not authenticated phone identity.
 For persistent manual setup, write usb, ios or android plus a newline to
@@ -94,7 +95,7 @@ def _root(script, *args):
 
 
 def setup_gadget(mode=None):
-  """Run the existing plain setup for USB, or add NCM before ep0/UDC binding."""
+  """Configure the selected functions before ep0/UDC binding."""
   mode = transport_mode() if mode is None else transport_mode({'JETLINK_TRANSPORT': mode})
   if mode in ('auto', 'ios'):
     _root('setup_mobile.sh', 'gadget')
@@ -104,7 +105,7 @@ def setup_gadget(mode=None):
       # A retained, detached NCM function requires no further teardown.
       # The helper refuses bound/unowned NCM rather than altering another owner.
       teardown_gadget()
-    _root('setup_gadget.sh')
+    _root('setup_gadget.sh', *(['--management'] if mode == 'usb' else []))
   return mode
 
 

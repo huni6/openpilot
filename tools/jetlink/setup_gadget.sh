@@ -16,6 +16,7 @@
 # On failure the reason is left in $STATUS_FILE as well as on stderr, so the
 # openpilot side can say why the link is unavailable.
 set -euo pipefail
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 
 GADGET=/sys/kernel/config/usb_gadget/jetlink
 FFS_MOUNT=${FFS_MOUNT:-/dev/ffs-jetlink}
@@ -41,6 +42,7 @@ fail() {
 if [[ "${1:-}" == "--teardown" ]]; then
   if [[ -d "$GADGET" ]]; then
     echo "" > "$GADGET/UDC" 2>/dev/null || true
+    python3 "$SCRIPT_DIR/usb_management.py" detach
     rm -f "$GADGET/configs/c.1/ffs.$FFS_NAME" 2>/dev/null || true
     rmdir "$GADGET/configs/c.1/strings/0x409" 2>/dev/null || true
     rmdir "$GADGET/configs/c.1" 2>/dev/null || true
@@ -149,6 +151,12 @@ mountpoint -q "$FFS_MOUNT" || mount -t functionfs ${FFS_OPTS:+-o "$FFS_OPTS"} "$
 # the client binds the UDC as the openpilot user, so hand it that one attribute
 if [ -n "$FFS_OPTS" ]; then
   chown "$FFS_USER" "$GADGET/UDC" 2>/dev/null || true
+fi
+
+if [[ "${1:-}" == "--management" ]]; then
+  python3 "$SCRIPT_DIR/usb_management.py" gadget
+else
+  python3 "$SCRIPT_DIR/usb_management.py" detach
 fi
 
 status ok

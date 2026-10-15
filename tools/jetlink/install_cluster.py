@@ -90,15 +90,8 @@ def switch(runtime, release):
   os.replace(target, runtime / 'current')
 
 
-def install(runtime, bundle, expected_sha256, probe):
-  previous = check(runtime)
-  pin = runtime / 'HL_CLUSTER_PIN.json'
-  if pin.exists():
-    raise ValueError('A custom runtime is already installed; rollback before replacing it')
-  updater = runtime / 'updater/update_host.py'
-  backup = updater.with_name('update_host.hl-original.py')
-  if backup.exists():
-    raise ValueError('Previous updater backup exists; resolve it before installing')
+def prepare_release(runtime, previous, bundle, expected_sha256, probe):
+  """Build and probe a new release without changing the selected runtime."""
   with tempfile.TemporaryDirectory(prefix='hl-stage-', dir=runtime / 'releases') as temporary:
     staging = Path(temporary)
     overlay = staging / 'overlay'
@@ -106,6 +99,13 @@ def install(runtime, bundle, expected_sha256, probe):
     manifest = extract_verified(bundle, overlay, expected_sha256)
     candidate = staging / 'runtime'
     shutil.copytree(previous, candidate, symlinks=True, ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
+    old_manifest = candidate / 'HL_CLUSTER_MANIFEST.json'
+    if old_manifest.is_file():
+      for name in set(json.loads(old_manifest.read_text())['files']) - set(manifest['files']):
+        removed = candidate / name
+        if not removed.resolve().is_relative_to(candidate.resolve()):
+          raise ValueError('Previous manifest redirects outside release')
+        removed.unlink(missing_ok=True)
     for source in overlay.rglob('*'):
       if source.is_file():
         dest = candidate / source.relative_to(overlay)
@@ -122,7 +122,7 @@ def install(runtime, bundle, expected_sha256, probe):
     try:
       probe(candidate)
     finally:
-      if remembered.read_bytes() != original_model:
+      if not remembered.exists() or remembered.read_bytes() != original_model:
         atomic_bytes(remembered, original_model)
     target = runtime / 'releases' / ('hl-' + manifest['content_sha256'][:20])
     if target.exists():
@@ -130,6 +130,19 @@ def install(runtime, bundle, expected_sha256, probe):
       # never reuse or overwrite a retained runtime that may have been modified.
       target = target.with_name(target.name + '-' + uuid.uuid4().hex)
     candidate.rename(target)
+  return target, manifest
+
+
+def install(runtime, bundle, expected_sha256, probe):
+  previous = check(runtime)
+  pin = runtime / 'HL_CLUSTER_PIN.json'
+  if pin.exists():
+    raise ValueError('A custom runtime is already installed; rollback before replacing it')
+  updater = runtime / 'updater/update_host.py'
+  backup = updater.with_name('update_host.hl-original.py')
+  if backup.exists():
+    raise ValueError('Previous updater backup exists; resolve it before installing')
+  target, manifest = prepare_release(runtime, previous, bundle, expected_sha256, probe)
   atomic_bytes(backup, updater.read_bytes())
   atomic_bytes(updater, (target / 'tools/jetlink/update_guard.py').read_bytes())
   atomic_bytes(pin, json.dumps({'previous': str(previous.relative_to(runtime)),

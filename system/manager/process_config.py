@@ -91,6 +91,9 @@ def enable_cluster_hud(started, params, CP: car.CarParams) -> bool:
   except Exception:
     return False
 
+def enable_comma_remote(started, params, CP: car.CarParams) -> bool:
+  return os.path.isfile('/data/hl-comma-remote/enabled')
+
 procs = [
   DaemonProcess("manage_athenad", "system.athena.manage_athenad", "AthenadPid"),
 
@@ -108,6 +111,8 @@ procs = [
 
   PythonProcess("modeld", "selfdrive.modeld.modeld", only_onroad),
   PythonProcess("jetlinkd", "selfdrive.modeld.jetlink.daemon", always_run, enabled=TICI, restart_if_crash=True),
+  PythonProcess("jetson_maintenance", "selfdrive.carrot.jetson_maintenance", always_run, enabled=TICI, restart_if_crash=True),
+  PythonProcess("comma_remote", "selfdrive.carrot.comma_remote", enable_comma_remote, enabled=TICI, restart_if_crash=True),
   PythonProcess("dmonitoringmodeld", "selfdrive.modeld.dmonitoringmodeld", enable_dm, enabled=(WEBCAM or not PC)),
   PythonProcess("sensord", "system.sensord.sensord", only_onroad, enabled=not PC),
   PythonProcess("ui", "selfdrive.ui.ui", always_run, restart_if_crash=True),
