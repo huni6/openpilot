@@ -182,6 +182,8 @@ def test_both_huds_draw_current_badge(ui, monkeypatch, kind, detail):
   ui.state.ui_state.jetlink_detail = detail
   width, height = (2160, 1080) if kind == 'wide' else (476, 240)
   renderer._render(rl.Rectangle(30, 20, width, height))
+  if kind == 'compact':
+    renderer.draw_jetlink_status(rl.Rectangle(30, 20, width, height))
   assert draw.call_args.args[0] == ui.state.ui_state.jetlink_badge
   bounds = draw.call_args.args[1]
   assert 30 <= bounds.x < bounds.x + bounds.width <= 30 + width
@@ -201,6 +203,38 @@ def test_both_huds_draw_current_badge(ui, monkeypatch, kind, detail):
     renderer._render(rl.Rectangle(0, 0, width, height))
     draw.assert_not_called()
     draw_detail.assert_not_called()
+    renderer.draw_jetlink_status(rl.Rectangle(0, 0, width, height))
+    draw.assert_called_once()
+
+
+@pytest.mark.parametrize('status', [log.SelfdriveState.AlertStatus.normal,
+                                  log.SelfdriveState.AlertStatus.userPrompt,
+                                  log.SelfdriveState.AlertStatus.critical])
+@pytest.mark.parametrize('size', [log.SelfdriveState.AlertSize.small,
+                                log.SelfdriveState.AlertSize.mid,
+                                log.SelfdriveState.AlertSize.full])
+def test_compact_jetlink_survives_ordinary_alerts_but_yields_to_safety_alerts(ui, monkeypatch, status, size):
+  renderer = object.__new__(ui.compact.HudRenderer)
+  draw, detail = Mock(), Mock()
+  monkeypatch.setattr(ui.compact, 'draw_jetlink_badge', draw)
+  monkeypatch.setattr(ui.compact, 'draw_jetlink_detail', detail)
+  ui.state.ui_state.jetlink_badge = ('jetSON READY', 'ready')
+  ui.state.ui_state.jetlink_detail = 'Connection details'
+  renderer.draw_jetlink_status(rl.Rectangle(30, 20, 476, 240), SimpleNamespace(status=status, size=size))
+  if status == log.SelfdriveState.AlertStatus.normal and size != log.SelfdriveState.AlertSize.full:
+    draw.assert_called_once()
+    bounds = draw.call_args.args[1]
+    assert 30 <= bounds.x < bounds.x + bounds.width <= 506
+    assert 220 <= bounds.y < bounds.y + bounds.height <= 260
+  else:
+    draw.assert_not_called()
+  detail.assert_not_called()
+
+
+def test_compact_status_is_drawn_after_alert_in_real_view():
+  source = (ROOT / 'selfdrive/ui/mici/onroad/augmented_road_view.py').read_text()
+  assert source.index('self._alert_renderer.render(self._content_rect)') < source.index(
+    'self._hud_renderer.draw_jetlink_status(self._content_rect, alert_to_render)')
 
 
 @pytest.mark.parametrize(('values', 'fragments'), [

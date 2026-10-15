@@ -283,16 +283,24 @@ class HudRenderer(Widget):
     self._draw_set_speed(rect)
 
     self._draw_steering_wheel(rect)
-    if self._can_draw_top_icons:
-      # Keep the clock, traffic countdown and speed/gear panel unobstructed.
-      if ui_state.jetlink_detail:
-        draw_jetlink_badge(ui_state.jetlink_badge, rl.Rectangle(rect.x + rect.width - 96, rect.y + rect.height - 114, 90, 42),
-                          13, stacked=True)
-        draw_jetlink_detail(ui_state.jetlink_detail, rl.Rectangle(rect.x + rect.width - 96, rect.y + rect.height - 70, 90, 52),
-                           10, time.monotonic() - ui_state.jetlink_detail_since)
-      else:
-        draw_jetlink_badge(ui_state.jetlink_badge, rl.Rectangle(rect.x + rect.width - 96, rect.y + rect.height - 76, 90, 58),
-                          18, stacked=True)
+
+  def draw_jetlink_status(self, rect: rl.Rectangle, alert=None) -> None:
+    # Render after ordinary alerts, without covering their top-aligned text.
+    if alert is not None:
+      if alert.status != log.SelfdriveState.AlertStatus.normal or alert.size == log.SelfdriveState.AlertSize.full:
+        return
+      draw_jetlink_badge(ui_state.jetlink_badge, rl.Rectangle(rect.x + rect.width - 190, rect.y + rect.height - 40, 172, 24), 14)
+      return
+
+    # Keep the clock, traffic countdown and speed/gear panel unobstructed.
+    if ui_state.jetlink_detail:
+      draw_jetlink_badge(ui_state.jetlink_badge, rl.Rectangle(rect.x + rect.width - 96, rect.y + rect.height - 114, 90, 42),
+                        13, stacked=True)
+      draw_jetlink_detail(ui_state.jetlink_detail, rl.Rectangle(rect.x + rect.width - 96, rect.y + rect.height - 70, 90, 52),
+                         10, time.monotonic() - ui_state.jetlink_detail_since)
+    else:
+      draw_jetlink_badge(ui_state.jetlink_badge, rl.Rectangle(rect.x + rect.width - 96, rect.y + rect.height - 76, 90, 58),
+                        18, stacked=True)
 
   def _draw_steering_wheel(self, rect: rl.Rectangle) -> None:
     wheel_txt = self._txt_wheel_critical if self._show_wheel_critical else self._txt_wheel

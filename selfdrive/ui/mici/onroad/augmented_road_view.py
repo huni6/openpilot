@@ -250,6 +250,7 @@ class AugmentedRoadView(CameraView):
     self._hud_renderer.render(self._content_rect)
     if ui_state.started:
       self._alert_renderer.render(self._content_rect)
+      self._hud_renderer.draw_jetlink_status(self._content_rect, alert_to_render)
 
     # Draw fake rounded border
     rl.draw_rectangle_rounded_lines_ex(self._content_rect, 0.2 * 1.02, 10, 50, rl.BLACK)
