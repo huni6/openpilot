@@ -224,8 +224,9 @@ def test_compact_jetlink_survives_ordinary_alerts_but_yields_to_safety_alerts(ui
   if status == log.SelfdriveState.AlertStatus.normal and size != log.SelfdriveState.AlertSize.full:
     draw.assert_called_once()
     bounds = draw.call_args.args[1]
-    assert 30 <= bounds.x < bounds.x + bounds.width <= 506
-    assert 220 <= bounds.y < bounds.y + bounds.height <= 260
+    assert 30 + 373 <= bounds.x < bounds.x + bounds.width <= 506
+    assert 20 + 120 <= bounds.y < bounds.y + bounds.height <= 260
+    assert draw.call_args.kwargs == {'stacked': True}
   else:
     draw.assert_not_called()
   detail.assert_not_called()

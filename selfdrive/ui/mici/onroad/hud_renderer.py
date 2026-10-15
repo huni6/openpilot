@@ -289,7 +289,8 @@ class HudRenderer(Widget):
     if alert is not None:
       if alert.status != log.SelfdriveState.AlertStatus.normal or alert.size == log.SelfdriveState.AlertSize.full:
         return
-      draw_jetlink_badge(ui_state.jetlink_badge, rl.Rectangle(rect.x + rect.width - 190, rect.y + rect.height - 40, 172, 24), 14)
+      draw_jetlink_badge(ui_state.jetlink_badge, rl.Rectangle(rect.x + rect.width - 96, rect.y + rect.height - 110, 90, 58),
+                        18, stacked=True)
       return
 
     # Keep the clock, traffic countdown and speed/gear panel unobstructed.
