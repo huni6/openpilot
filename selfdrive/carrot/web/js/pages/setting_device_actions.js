@@ -1,6 +1,8 @@
 "use strict";
 
 function bindDeviceTabEvents(container) {
+  if (container.querySelector("#remoteSupportPanel")) bindRemoteSupportPanel(container);
+  if (container.querySelector("#jetsonPanel")) bindJetsonPanel(container);
   bindDeviceDisabledControls(container);
   bindDeviceToggleRows(container);
   bindDevicePersonality(container);

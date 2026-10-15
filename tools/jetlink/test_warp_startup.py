@@ -39,6 +39,7 @@ def test_prepared_warp_never_discovers_default_gpu(monkeypatch):
   monkeypatch.setattr(model, 'make_warp_inputs', lambda: pytest.fail('late buffer allocation'))
   warp = model.Warp(1344, 760, prepared=b'captured', input_buffers=(transforms, inputs))
   assert warp.run_warp is executable and warp.transforms is transforms and warp.inputs is inputs
+  assert not warp.ready
 
 
 @pytest.mark.parametrize('ready,allowed,outputs', [(False, True, 3), (True, False, 3), (True, True, 0), (True, True, 2)])
@@ -77,14 +78,19 @@ def test_completed_preparation_obeys_current_join_permission(monkeypatch):
   def install(*args, prepared, input_buffers):
     assert input_buffers is m.warp_inputs
     installed.append(prepared)
-    return lambda *a: None
+    def warp(*a):
+      return None
+    warp.ready = True
+    return warp
   monkeypatch.setattr(model, 'Warp', install)
   monkeypatch.setattr(model, 'ClientConnection', lambda: NS(future=Future()))
   assert m.run({}, {}, {}, False) == 'local'
   assert not installed and m.connection is None
   m.join_allowed = True
   assert m.run({}, {}, {}, False) == 'local'
-  assert installed == [b'validated'] and m.preparation is None and m.connection is not None
+  assert installed == [b'validated'] and m.preparation is None and m.connection is None
+  assert m.run({}, {}, {}, False) == 'local'
+  assert m.connection is not None
 
 
 def test_disconnect_cancels_preparation_and_keeps_local_model(monkeypatch):
@@ -95,6 +101,57 @@ def test_disconnect_cancels_preparation_and_keeps_local_model(monkeypatch):
   m.ready = False
   assert m.run({}, {}, {}, False) == 'local'
   assert closed == [True] and m.preparation is None and not m.active
+
+
+def test_runtime_warmup_is_staged_while_native_frames_continue(monkeypatch):
+  m = joining_model(monkeypatch)
+  m.warp.ready = False
+  steps = []
+  def warmup(*args):
+    steps.append('step')
+    m.warp.ready = len(steps) == 3
+  m.warp.warmup_step = warmup
+  pending = NS(future=Future())
+  def connect():
+    assert len(steps) == 3
+    return pending
+  monkeypatch.setattr(model, 'ClientConnection', connect)
+  for i in range(3):
+    assert m.run({}, {}, {}, False) == 'local'
+    assert len(steps) == i + 1
+  assert m.connection is pending and m.small_runs == 6
+
+
+def test_runtime_warmup_failure_keeps_native_model_and_delays_retry(monkeypatch):
+  m = joining_model(monkeypatch)
+  m.warp.ready = False
+  def fail(*args):
+    raise RuntimeError('bad runtime')
+  m.warp.warmup_step = fail
+  monkeypatch.setattr(model, 'ClientConnection', lambda: pytest.fail('cold runtime must not connect'))
+  assert m.run({}, {}, {}, False) == 'local'
+  assert m.warp is None and m.error == 'bad runtime' and m.next_join > 0
+
+
+def test_runtime_generator_advances_one_stage_without_repeating_completed_work():
+  warp = object.__new__(model.Warp)
+  warp.ready = False
+  warp._warmup = None
+  warp._inputs = lambda *args: {}
+  calls = []
+  def prepare(inputs):
+    for i in range(2):
+      calls.append(i)
+      yield
+  warp._prepare_runtime = prepare
+  warp.warmup_step({}, {})
+  assert calls == [0] and not warp.ready
+  warp.warmup_step({}, {})
+  assert calls == [0, 1] and not warp.ready
+  warp.warmup_step({}, {})
+  assert warp.ready
+  warp.warmup_step({}, {})
+  assert calls == [0, 1]
 
 
 @pytest.mark.parametrize('stage', ['worker', 'install'])

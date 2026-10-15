@@ -15,6 +15,34 @@ import prepare_ssd
 from test_cluster_install import bundle_at, runtime_at
 
 
+@pytest.mark.parametrize('changed,pending', [(False, False), (True, False), (False, True)])
+@pytest.mark.parametrize('error', [ValueError, KeyError, TypeError])
+def test_daemon_backs_off_failed_builds_but_not_new_commits_or_pending_jobs(tmp_path, monkeypatch, changed, pending, error):
+  class Finished(BaseException):
+    pass
+  now, attempts = [100.], []
+  monkeypatch.setattr(client, 'STATE', tmp_path)
+  monkeypatch.setattr(client, 'Safety', lambda: lambda: True)
+  monkeypatch.setattr(client, 'read_json', lambda *args: {'automatic': True})
+  monkeypatch.setattr(client.time, 'monotonic', lambda: now[0])
+  monkeypatch.setattr(client, 'run', lambda args: 'new' if changed and now[0] >= 140 else 'old')
+  monkeypatch.setattr(client, 'save_status', lambda *args, **kwargs: None)
+  if pending:
+    (tmp_path / 'job.json').touch()
+  def sync(*args):
+    attempts.append(now[0])
+    raise error('Invalid bundle or journal')
+  def sleep(seconds):
+    now[0] += seconds
+    if now[0] > 250:
+      raise Finished
+  monkeypatch.setattr(client, 'sync', sync)
+  monkeypatch.setattr(client.time, 'sleep', sleep)
+  with pytest.raises(Finished):
+    client.daemon()
+  assert attempts == (list(range(130, 251, 10)) if pending else [130., 140., 170., 230.] if changed else [130., 160., 220.])
+
+
 def key(byte=1):
   raw = struct.pack('>I', 11) + b'ssh-ed25519' + struct.pack('>I', 32) + bytes([byte]) * 32
   return 'ssh-ed25519 ' + base64.b64encode(raw).decode()
@@ -27,6 +55,8 @@ def runtime(tmp_path, monkeypatch):
   monkeypatch.setattr(host, 'command', lambda *a, **k: None)
   monkeypatch.setattr(host, 'services', lambda *a, **k: None)
   root = runtime_at(tmp_path)
+  usage = shutil.disk_usage(root)
+  monkeypatch.setattr(host.shutil, 'disk_usage', lambda _: type(usage)(2 << 30, 0, 2 << 30))
   monkeypatch.setattr(installer, 'RUNTIME', root)
   return root
 
@@ -215,6 +245,7 @@ def test_changed_ip_uses_same_pinned_identity(tmp_path, monkeypatch):
   client.private_json(tmp_path / 'config.json', dict(version=1, host='192.168.1.2', fingerprint=client.fingerprint(key())))
   (tmp_path / 'known_hosts').write_text(client.ALIAS + ' ' + key())
   monkeypatch.setattr(client, 'discover', lambda: ['192.168.42.5'])
+  monkeypatch.setattr(client, 'usb_candidate', list)
   attempts = []
   monkeypatch.setattr(client, 'ssh', lambda state, ip, args: attempts.append(ip))
   assert client.connect(tmp_path) == '192.168.42.5'

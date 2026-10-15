@@ -7,7 +7,7 @@ import time
 
 import numpy as np
 
-from openpilot.selfdrive.modeld.jetlink.link import ClientConnection, SPEC, FAULT, state
+from openpilot.selfdrive.modeld.jetlink.link import ClientConnection, SPEC, FAULT, FAULT_HOLD_SECONDS, state
 from openpilot.selfdrive.modeld.jetlink.prepare import WarpPreparation
 from openpilot.selfdrive.modeld.jetlink.contracts import model_name, parse_outputs
 
@@ -43,6 +43,8 @@ class Warp:
     self.transforms, self.inputs = input_buffers if input_buffers is not None else make_warp_inputs()
     self.blobs = {}
     self.timings = (0., 0., 0.)
+    self.ready = prepared is None
+    self._warmup = None
     if prepared is not None:
       inputs_ready = time.monotonic()
       from openpilot.selfdrive.modeld.helpers import load_oob
@@ -82,9 +84,8 @@ class Warp:
       if actual.shape != expected.shape or actual.dtype != expected.dtype or not np.array_equal(actual, expected):
         raise ValueError('prepared Jetlink warp serialization changed pixels')
 
-  def __call__(self, bufs, transforms):
+  def _inputs(self, bufs, transforms):
     from tinygrad import Tensor
-    started = time.monotonic()
     frames = {}
     for key, arg in (('img', 'frame'), ('big_img', 'big_frame')):
       source = np.frombuffer(bufs[key].data, np.uint8)
@@ -98,8 +99,40 @@ class Warp:
       frames[arg] = self.blobs[cache_key]
     self.transforms['tfm'][:] = transforms['img']
     self.transforms['big_tfm'][:] = transforms['big_img']
+    return {**self.inputs, **frames}
+
+  def _prepare_runtime(self, inputs):
+    from tinygrad.engine.jit import _prepare_jit_inputs
+    from tinygrad.engine.realize import get_graph_runtime, get_runtime
+    from tinygrad.uop.ops import Ops
+    input_uops, _, _, _ = _prepare_jit_inputs((), inputs)
+    # Restoring a captured graph does not initialize its process-local kernels.
+    # Stage one runtime per native frame; no external output is used yet.
+    for call in self.run_warp.captured.linear.src:
+      ast = call.src[0]
+      if ast.op == Ops.CUSTOM_FUNCTION and ast.arg == 'graph':
+        get_graph_runtime(ast, tuple(input_uops))
+        yield
+      elif ast.op == Ops.PROGRAM:
+        get_runtime(call.src[1].device, ast)
+        yield
+
+  def warmup_step(self, bufs, transforms):
+    if self.ready:
+      return
+    if self._warmup is None:
+      self._warmup = self._prepare_runtime(self._inputs(bufs, transforms))
+    try:
+      next(self._warmup)
+    except StopIteration:
+      self._warmup = None
+      self.ready = True
+
+  def __call__(self, bufs, transforms):
+    started = time.monotonic()
+    inputs = self._inputs(bufs, transforms)
     prepared = time.monotonic()
-    result = self.run_warp(**self.inputs, **frames)
+    result = self.run_warp(**inputs)
     submitted = time.monotonic()
     output = result.numpy()
     self.timings = (prepared - started, submitted - prepared, time.monotonic() - submitted)
@@ -122,6 +155,7 @@ class JoiningModel:
     self.client = None
     self.connection = None
     self.active = False
+    self.fault_until = 0.
     self.usbgpu = False
     self.vision_input_names = ['img', 'big_img']
     self.packed = np.zeros(SPEC.packed_nelem, np.float32)
@@ -138,6 +172,11 @@ class JoiningModel:
     self.error = ''
     self.small_runs = 0
     self.last_slow_log = 0.
+
+  @property
+  def output_valid(self):
+    # The model message also carries the fault if the shared-memory marker fails.
+    return time.monotonic() >= self.fault_until
 
   def update(self, sm, metadata):
     self.source_sof = metadata.timestamp_sof if self.phase_enabled else 0
@@ -170,6 +209,7 @@ class JoiningModel:
 
   def run(self, bufs, transforms, inputs, prepare_only):
     from openpilot.common.swaglog import cloudlog
+    installed_warp = False
     if self.preparation is not None and not self.ready:
       self.preparation.close()
       self.preparation = None
@@ -183,6 +223,7 @@ class JoiningModel:
           started = time.monotonic()
           self.warp = Warp(*self.warp_size, prepared=prepared, input_buffers=self.warp_inputs)
           self.preparation = None
+          installed_warp = True
           cloudlog.warning('Jetlink warp prepared in %.3fs; installed in %.3fs', seconds, time.monotonic() - started)
           cloudlog.warning('Jetlink warp install input/restore/cpu seconds: %s', getattr(self.warp, 'init_timings', ()))
       except Exception as exc:
@@ -193,9 +234,21 @@ class JoiningModel:
         self.error = str(exc)
         self.next_join = time.monotonic() + 30
     if self.connection is not None and not (self.ready and self.join_allowed):
-      self.connection.close()
+      connection = self.connection
       self.connection = None
-    if (self.warp is not None and self.client is None and self.small_runs >= 3 and
+      try:
+        connection.close()
+      except Exception:
+        cloudlog.exception('Jetlink cancelled handshake cleanup failed')
+    if self.warp is not None and not installed_warp and not self.warp.ready and self.ready and self.join_allowed:
+      try:
+        self.warp.warmup_step(bufs, transforms)
+      except Exception as exc:
+        cloudlog.exception('Jetlink warp runtime initialization failed; retaining internal model')
+        self.warp = None
+        self.error = str(exc)
+        self.next_join = time.monotonic() + 30
+    if (self.warp is not None and not installed_warp and self.warp.ready and self.client is None and self.small_runs >= 3 and
         self.ready and self.join_allowed and time.monotonic() >= self.next_join):
       try:
         if self.connection is None:
@@ -251,16 +304,27 @@ class JoiningModel:
       except Exception as exc:
         cloudlog.exception('Jetlink failed; restoring local model')
         self.error = str(exc)
-        self.client.close()
+        failed_at = time.monotonic()
+        was_active = self.active
+        client = self.client
         self.client = None
-        if self.active:
-          # Existing commIssue event requests disengagement even if local
-          # inference recovers immediately; never silently switch under control.
-          FAULT.write_text(str(time.monotonic()))
-          self._reset_small()
         self.active = False
-        self.next_join = time.monotonic() + 5
+        self.next_join = failed_at + FAULT_HOLD_SECONDS
         self.next_status = 0
+        if was_active:
+          self.fault_until = failed_at + FAULT_HOLD_SECONDS
+        try:
+          client.close()
+        except Exception:
+          cloudlog.exception('Jetlink socket cleanup failed')
+        if was_active:
+          # Keep the existing commIssue signal across modeld restarts, with
+          # output_valid as an independent path on the normal model IPC.
+          try:
+            FAULT.write_text(str(failed_at))
+          except OSError:
+            cloudlog.exception('Jetlink fault marker unavailable; model output remains invalid')
+          self._reset_small()
     result = self.small.run(bufs, transforms, inputs, prepare_only)
     if result is not None:
       # Loading the PKL alone leaves its first execution cold (~0.8 s on C4).

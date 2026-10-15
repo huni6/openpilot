@@ -17,7 +17,9 @@ from openpilot.selfdrive.modeld.jetlink.link import (SOCKET, STATUS, REQUEST, RE
 from openpilot.selfdrive.modeld.jetlink.phase import Publisher as PhasePublisher
 from openpilot.selfdrive.modeld.jetlink.mac import prepare, PreparationDeferred
 from openpilot.selfdrive.modeld.jetlink.compat import ProtocolChoice
-from openpilot.selfdrive.modeld.jetlink.mobile import transport_mode, setup_gadget, activate_management, MobileCable, AutoTransport, MobileLinkError
+from openpilot.selfdrive.modeld.jetlink.mobile import (
+  transport_mode, setup_gadget, activate_management, initialize_management, MobileCable, AutoTransport, MobileLinkError,
+)
 from openpilot.selfdrive.modeld.jetlink.contracts import model_name
 from openpilot.selfdrive.modeld.jetlink.selection import ModelChanged, check_loaded
 from openpilot.selfdrive.modeld.jetlink.startup import CAPABILITY as BOOT_UPDATE_CAPABILITY, wait_for_boot_update
@@ -42,15 +44,16 @@ class UnsafeCleanupError(LinkError):
   pass
 
 
-def update_affinity():
-  from openpilot.common.params import Params
-  onroad = Params().get_bool('IsOnroad') and Path('/sys/devices/system/cpu/cpu7/online').read_text().strip() == '1'
+def update_affinity(inference=False):
+  realtime = inference and Path('/sys/devices/system/cpu/cpu7/online').read_text().strip() == '1'
   # Keep USB completion and IPC work off modeld/DM's core7. Pinning the
   # reader there delayed runnable reads behind DM and blocked the host's
   # response write. Include the normal-priority watchdog in this placement.
   # Model/DM policies and the display children's separate policy are unchanged.
   cores = set(range(4))
-  os.sched_setscheduler(0, os.SCHED_FIFO if onroad else os.SCHED_OTHER, os.sched_param(1 if onroad else 0))
+  # A live model IPC session has the same deadline during desk validation and
+  # road-state transitions. Idle offroad maintenance remains normal priority.
+  os.sched_setscheduler(0, os.SCHED_FIFO if realtime else os.SCHED_OTHER, os.sched_param(1 if realtime else 0))
   for thread in Path('/proc/self/task').iterdir():
     try:
       os.sched_setaffinity(int(thread.name), cores)
@@ -69,7 +72,11 @@ def publish_hud(client, publisher):
       client.t.send(HUD_MESSAGE, client._next_seq(), [packet])
     # At most one small fragment per inference window. No video
     # decoding or unbounded stream draining occurs on the USB owner's thread.
-    media = publisher.media_packet()
+    try:
+      media = publisher.media_packet()
+    except Exception:
+      log.exception('display artwork unavailable')
+      return
     if media:
       client.t.send(ART_MESSAGE, client._next_seq(), [media])
 
@@ -221,6 +228,9 @@ def _serve_local(listener, client, peer, publisher, phase, wifi=None):
         check_loaded(client, client.last_state)
         telemetry_updated = time.monotonic()
         last_ping = time.monotonic()
+        # Do not leave a newer health reply behind the periodic status write.
+        publish('ready', spec=spec, peer=peer, telemetry=client.last_state, telemetry_updated=telemetry_updated)
+        last_status = telemetry_updated
       continue
     with connection:
       connection.settimeout(.5)
@@ -232,11 +242,12 @@ def _serve_local(listener, client, peer, publisher, phase, wifi=None):
           if result.to_dict() != spec.to_dict():
             raise ModelChanged('Jetlink model contract changed before local inference')
           requested = True
+        update_affinity(inference=True)
         send(connection, json.dumps({'spec': spec.to_dict(), 'peer': peer}).encode())
         while host_attached():
           loop_started, cpu_started = time.monotonic(), time.thread_time()
           if time.monotonic() - last_status >= 1:
-            update_affinity()
+            update_affinity(inference=True)
             publish('ready', spec=spec, peer=peer, timings=list(client.last_timings),
                     telemetry=client.last_state, telemetry_updated=telemetry_updated)
             last_status = time.monotonic()
@@ -311,6 +322,8 @@ def _serve_local(listener, client, peer, publisher, phase, wifi=None):
           )
       except (ConnectionError, BrokenPipeError, ValueError) as exc:
         log.info('local client ended: %s', exc)
+      finally:
+        update_affinity()
     last_ping = time.monotonic()
 
 
@@ -337,6 +350,7 @@ def main():
   os.sched_setaffinity(0, set(range(min(4, os.cpu_count() or 1))))
   lock = open('/dev/shm/carrot-jetlink.lock', 'w')
   fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+  initialize_management()
   Path(SOCKET).unlink(missing_ok=True)
   listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
   listener.bind(SOCKET)
@@ -387,7 +401,7 @@ def main():
         if owner is None:
           # Optional iOS networking must not make existing bulk USB depend on
           # NCM, dnsmasq or a firewall backend. Cleanup is verified below first.
-          setup_gadget('usb' if mobile_unavailable else TRANSPORT_MODE)
+          setup_gadget('usb' if mobile_unavailable else TRANSPORT_MODE, management=TRANSPORT_MODE == 'usb')
           udc = next(Path('/sys/class/udc').iterdir()).name
           owner = CarrotTransport('/dev/ffs-jetlink', gadget=GADGET, udc=udc)
           if TRANSPORT_MODE == 'usb':

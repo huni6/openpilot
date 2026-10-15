@@ -242,7 +242,7 @@ def test_idle_session_releases_old_request_offroad_and_detects_app_switch(monkey
   spec = queued_spec()
   monkeypatch.setattr(daemon, 'TRANSPORT_MODE', 'usb')
   monkeypatch.setattr(daemon, 'host_attached', lambda: True)
-  monkeypatch.setattr(daemon, 'update_affinity', lambda: None)
+  monkeypatch.setattr(daemon, 'update_affinity', lambda **kwargs: None)
   monkeypatch.setattr(daemon, 'publish', lambda *a, **kw: None)
   clock = [0.]
   def monotonic():
@@ -265,6 +265,33 @@ def test_idle_session_releases_old_request_offroad_and_detects_app_switch(monkey
   assert calls == (['hello'] if offroad else [])
 
 
+def test_idle_health_reply_is_published_before_next_accept(monkeypatch):
+  spec = queued_spec()
+  clock = [0.]
+  connected = [True]
+  published = []
+  monkeypatch.setattr(daemon, 'host_attached', lambda: connected[0])
+  monkeypatch.setattr(daemon, 'update_affinity', lambda **kwargs: None)
+  monkeypatch.setattr(daemon, 'publish', lambda *a, **kw: published.append(kw))
+  def monotonic():
+    clock[0] += .6
+    return clock[0]
+  monkeypatch.setattr(daemon.time, 'monotonic', monotonic)
+  monkeypatch.setitem(sys.modules, 'openpilot.common.params', SimpleNamespace(Params=lambda: None))
+  monkeypatch.setitem(sys.modules, 'openpilot.common.runtime_diagnostics', SimpleNamespace(RuntimeDiagnostics=lambda *a: None))
+  monkeypatch.setitem(sys.modules, 'openpilot.common.swaglog', SimpleNamespace(cloudlog=SimpleNamespace(event=lambda *a: None)))
+  latest = {'loaded': spec.sha256, 'carrot_health': {'age_s': .6, 'severity': 'ok'}}
+  def state():
+    connected[0] = False
+    return latest
+  def accept():
+    raise TimeoutError
+  remote = SimpleNamespace(spec=spec, state=state, last_state={})
+  daemon._serve_local(SimpleNamespace(accept=accept), remote, {'protocol': 2}, None, None)
+  assert published[-1]['telemetry'] is latest
+  assert published[-1]['telemetry_updated'] > 0
+
+
 @pytest.mark.parametrize('factory', [queued_spec, stateful_spec, compact_spec])
 def test_joining_model_uses_selected_buffers_parser_and_recurrence(tmp_path, monkeypatch, factory):
   spec = factory()
@@ -274,6 +301,7 @@ def test_joining_model_uses_selected_buffers_parser_and_recurrence(tmp_path, mon
   monkeypatch.setitem(sys.modules, 'openpilot.common.swaglog', SimpleNamespace(cloudlog=logs))
   class Warp:
     timings = (0., 0., 0.)
+    ready = True
     def __init__(self, *a, **kw): pass
     def __call__(self, *a): return np.zeros(spec.warped_shape, np.uint8)
   monkeypatch.setattr(model, 'Warp', Warp)
@@ -304,6 +332,7 @@ def test_joining_model_uses_selected_buffers_parser_and_recurrence(tmp_path, mon
   joining.small_runs, joining.ready, joining.join_allowed = 3, True, True
   inputs = {'desire_pulse': np.zeros(8, np.float32), 'traffic_convention': np.array([1, 0], np.float32),
             'action_t': np.array([.2, .3], np.float32)}
+  assert joining.run({}, {}, inputs, False) == {'fallback': True}
   for _ in range(2):
     output = joining.run({}, {}, inputs, False)
     assert output['plan'].shape == (1, 33, 15)

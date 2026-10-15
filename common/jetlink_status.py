@@ -138,6 +138,28 @@ def display_status():
   return status, _detail(status, link, model, health)
 
 
+def web_status():
+  """Current web diagnostics from the same snapshot as the native HUD badge."""
+  now, saved, link, model = _snapshot()
+  health = _diagnostics(now, saved, link, model)
+  badge = _badge(link, model, health)
+  peer = link.get('peer') or {}
+  telemetry = link.get('telemetry') or {}
+  fresh_health = bool(health and health.get('fresh'))
+  return {
+    'badge': badge[0] if badge else '', 'style': badge[1] if badge else 'unknown',
+    'detail': _detail(badge, link, model, health), 'state': link.get('state', 'disconnected'),
+    'fresh': bool(link), 'health': health, 'active': bool(model.get('active')),
+    'model': model.get('model') or link.get('model') or '',
+    'sha256': model.get('sha256') or link.get('sha256') or '',
+    'transport': link.get('transport', ''), 'device': peer.get('device', ''),
+    'runtime': peer.get('runtime_version', ''), 'protocol': peer.get('protocol'),
+    'engine_state': telemetry.get('engine_state') if fresh_health else None,
+    'hud_connected': telemetry.get('carrot_hud_connected') if fresh_health else None,
+    'frames_served': telemetry.get('frames_served') if fresh_health else None,
+  }
+
+
 def _badge(link, model, health):
   label = host_label(link.get('peer'), link.get('transport', 'usb'))
   if link.get('state') == 'updating' and label == 'jetSON':

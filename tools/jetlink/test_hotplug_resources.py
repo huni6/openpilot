@@ -11,6 +11,20 @@ import pytest
 from openpilot.selfdrive.modeld.jetlink import link, model
 
 
+def test_handshake_worker_moves_off_realtime_model_core(monkeypatch):
+  calls = []
+  monkeypatch.setattr(link.os, 'sched_setscheduler', lambda *args: calls.append('normal'), raising=False)
+  monkeypatch.setattr(link.os, 'SCHED_OTHER', 0, raising=False)
+  monkeypatch.setattr(link.os, 'sched_param', lambda priority: priority, raising=False)
+  monkeypatch.setattr(link.os, 'sched_setaffinity', lambda pid, cpus: calls.append(cpus), raising=False)
+  client = NS(warmup=lambda cancelled: calls.append('warmup'), close=lambda: None)
+  monkeypatch.setattr(link, 'Client', lambda: client)
+  future = Future()
+  link.ClientConnection._connect(future)
+  assert future.result() is client
+  assert calls == ['normal', {0, 1, 2}, 'warmup']
+
+
 @pytest.mark.parametrize('cancel', [False, True])
 def test_handshake_wait_does_not_block_caller_and_cancel_closes_socket(monkeypatch, cancel):
   entered, release, closed = threading.Event(), threading.Event(), threading.Event()
@@ -18,7 +32,7 @@ def test_handshake_wait_does_not_block_caller_and_cancel_closes_socket(monkeypat
   def connect():
     entered.set()
     assert release.wait(2)
-    return NS(close=closed.set)
+    return NS(close=closed.set, warmup=lambda cancelled: None)
 
   monkeypatch.setattr(link, 'Client', connect)
   connection = link.ClientConnection()
@@ -38,6 +52,30 @@ def test_handshake_wait_does_not_block_caller_and_cancel_closes_socket(monkeypat
     release.set()
 
 
+def test_handshake_warmup_failure_closes_client_and_preserves_error(monkeypatch):
+  closed = threading.Event()
+  def warmup(cancelled):
+    raise TimeoutError('warmup timed out')
+  monkeypatch.setattr(link, 'Client', lambda: NS(warmup=warmup, close=closed.set))
+  connection = link.ClientConnection()
+  with pytest.raises(TimeoutError, match='warmup timed out'):
+    connection.future.result(timeout=1)
+  assert closed.wait(1)
+
+
+def test_handshake_warmup_uses_resets_and_obeys_cancellation():
+  client = object.__new__(link.Client)
+  client.spec = link.SPEC
+  calls = []
+  client.infer = lambda images, packed, frame, reset: calls.append((images, packed.copy(), frame, reset))
+  client.warmup(lambda: len(calls) == 2)
+  assert len(calls) == 2
+  for images, packed, frame, reset in calls:
+    assert images.shape == link.SPEC.warped_shape and images.dtype == np.uint8
+    assert not images.any() and reset and frame in (0, 1)
+    assert packed[8] == 1 and np.count_nonzero(packed) == 1
+
+
 def joining_model(monkeypatch):
   monkeypatch.setitem(sys.modules, 'openpilot.common.swaglog', NS(cloudlog=NS(warning=lambda *a: None, exception=lambda *a: None)))
   m = object.__new__(model.JoiningModel)
@@ -49,6 +87,7 @@ def joining_model(monkeypatch):
   m.ready = m.join_allowed = True
   m.next_join = m.next_status = 0
   m.active = False
+  m.fault_until = 0.
   m.error = ''
   m.small = NS(run=lambda *a: 'local')
   m.packed = np.zeros(link.SPEC.packed_nelem, np.float32)
@@ -60,6 +99,7 @@ def joining_model(monkeypatch):
   m.frame = m.source_sof = 0
   m.last_slow_log = 0
   m.warp = lambda *a: None
+  m.warp.ready = True
   m.parser = NS(parse_outputs=lambda _: 'external')
   monkeypatch.setattr(model, 'parse_outputs', lambda parser, spec, result: parser.parse_outputs(result))
   return m
@@ -78,6 +118,16 @@ def test_pending_connection_keeps_local_frames_and_rechecks_join_permission(monk
   m.join_allowed = False
   assert m.run({}, {}, {}, False) == 'local'
   assert closed == [True] and m.connection is None and m.client is None
+
+
+def test_cancelled_handshake_cleanup_cannot_interrupt_native_inference(monkeypatch):
+  m = joining_model(monkeypatch)
+  def close():
+    raise OSError('socket cleanup failed')
+  m.connection = NS(close=close)
+  m.join_allowed = False
+  assert m.run({}, {}, {}, False) == 'local'
+  assert m.connection is None and m.client is None and m.output_valid
 
 
 def test_completed_handshake_still_resets_external_history_and_recovers_on_failure(monkeypatch, tmp_path):
@@ -106,6 +156,60 @@ def test_completed_handshake_still_resets_external_history_and_recovers_on_failu
   assert m.run({}, {}, inputs, False) == 'local'
   assert calls[-2:] == ['closed', 'reset'] and fault.exists()
   assert m.client is None and not m.active and m.next_join > 0
+  assert not m.output_valid
+
+
+@pytest.mark.parametrize('close_fails', [False, True])
+@pytest.mark.parametrize('marker_fails', [False, True])
+def test_cleanup_and_marker_failures_preserve_native_fallback_and_disengagement(monkeypatch, tmp_path, close_fails, marker_fails):
+  m = joining_model(monkeypatch)
+  now = [100.]
+  monkeypatch.setattr(model.time, 'monotonic', lambda: now[0])
+  calls = []
+
+  def infer(*a, **kw):
+    raise ConnectionError('unplugged')
+
+  def close():
+    calls.append('closed')
+    if close_fails:
+      raise OSError('socket cleanup failed')
+
+  m.active = True
+  m.client = NS(infer=infer, close=close)
+  m.small.reset = lambda: calls.append('reset')
+  fault = tmp_path if marker_fails else tmp_path / 'fault'
+  monkeypatch.setattr(model, 'FAULT', fault)
+  monkeypatch.setattr(link, 'FAULT', fault)
+  inputs = {'desire_pulse': np.zeros(8), 'traffic_convention': [1, 0], 'action_t': [.2, .3]}
+  assert m.output_valid
+  assert m.run({}, {}, inputs, False) == 'local'
+  assert calls == ['closed', 'reset']
+  assert m.client is None and not m.active and m.error == 'unplugged'
+  assert m.next_join == m.fault_until == 100. + link.FAULT_HOLD_SECONDS
+  assert link.fault_active() is not marker_fails
+  for elapsed in (0., 3., link.FAULT_HOLD_SECONDS - .001):
+    now[0] = 100. + elapsed
+    assert m.run({}, {}, {}, False) == 'local'
+    assert not m.output_valid
+  now[0] = 100. + link.FAULT_HOLD_SECONDS
+  assert m.output_valid
+  assert not link.fault_active()
+
+
+def test_failed_native_reset_is_not_hidden(monkeypatch, tmp_path):
+  m = joining_model(monkeypatch)
+  m.active = True
+  def fail(*a, **kw):
+    raise RuntimeError('reset failed')
+  m.client = NS(infer=fail, close=lambda: None)
+  m.small.reset = fail
+  m.small.run = lambda *a: pytest.fail('must not run stale native state')
+  monkeypatch.setattr(model, 'FAULT', tmp_path / 'fault')
+  inputs = {'desire_pulse': np.zeros(8), 'traffic_convention': [1, 0], 'action_t': [.2, .3]}
+  with pytest.raises(RuntimeError, match='reset failed'):
+    m.run({}, {}, inputs, False)
+  assert not m.output_valid and m.client is None and not m.active
 
 
 def test_failed_handshake_keeps_local_model_and_retry_delay(monkeypatch):

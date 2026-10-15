@@ -374,6 +374,7 @@ def daemon():
   safe = Safety()
   stable_since = None
   completed_commit = None
+  retry_commit, retry_after, retry_delay = None, 0., 30.
   while True:
     try:
       config = read_json(STATE / 'config.json', {})
@@ -381,12 +382,22 @@ def daemon():
       stable_since = (stable_since or time.monotonic()) if permitted else None
       if config.get('automatic') is True and stable_since and time.monotonic() - stable_since >= 30:
         commit = run(['git', '-C', str(ROOT), 'rev-parse', 'HEAD']).strip()
-        if completed_commit != commit or (STATE / 'job.json').exists():
+        if commit != retry_commit:
+          retry_commit, retry_after, retry_delay = commit, 0., 30.
+        pending = (STATE / 'job.json').exists()
+        if pending or (completed_commit != commit and time.monotonic() >= retry_after):
           report = sync(STATE, safe)
+          retry_after, retry_delay = 0., 30.
           if report.get('state') in TERMINAL:
             completed_commit = commit
-    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
-      save_status(STATE, state='waiting', reason=str(error)[-2400:])
+    except (OSError, ValueError, RuntimeError, KeyError, TypeError, AttributeError, subprocess.SubprocessError) as error:
+      # Keep existing jobs/leases responsive; only back off new failed builds.
+      if (STATE / 'job.json').exists():
+        retry_after, retry_delay = 0., 30.
+      else:
+        retry_after = time.monotonic() + retry_delay
+        retry_delay = min(retry_delay * 2, 600.)
+      save_status(STATE, state='waiting', reason=str(error)[-2400:], retry_after=retry_after)
     time.sleep(10)
 
 

@@ -135,11 +135,12 @@ class SelfdriveD:
     self.atc_type_last = ""
 
 
-    # some comma three with NVMe experience NVMe dropouts mid-drive that
-    # cause loggerd to crash on write, so ignore it only on that platform
-    self.ignored_processes = set()
+    # Remote access, maintenance and the optional display do not supply driving data.
+    # Manager still logs their failures and restarts them.
+    self.ignored_processes = {'jetson_maintenance', 'comma_remote', 'carrot_cluster'}
+    # Some comma three with NVMe experience dropouts mid-drive that crash loggerd.
     if HARDWARE.get_device_type() == 'tici' and os.path.exists('/dev/nvme0'):
-      self.ignored_processes = {'loggerd', }
+      self.ignored_processes.add('loggerd')
 
     # Determine startup event
     self.startup_event = EventName.startup #if build_metadata.openpilot.comma_remote and build_metadata.tested_channel else EventName.startupMaster

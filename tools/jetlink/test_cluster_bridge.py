@@ -2,6 +2,7 @@ from dataclasses import replace
 import ast
 import hashlib
 import json
+import os
 import re
 import socket
 import threading
@@ -58,6 +59,14 @@ def chunks(data):
           for offset in range(0, len(data), wire.ART_CHUNK_BYTES)]
 
 
+def write_snapshot(path, packet):
+  # Linux may assign the same mtime to back-to-back test writes. Production
+  # snapshots arrive on separate frame intervals; advance the fixture explicitly.
+  stamp = path.stat().st_mtime_ns if path.exists() else 0
+  path.write_bytes(packet)
+  os.utime(path, ns=(stamp + 1_000_000_000, stamp + 1_000_000_000))
+
+
 def test_art_fragments_atomic_and_integrity_checked(tmp_path):
   path = tmp_path / 'art'
   receiver = wire.ArtAssembler(path)
@@ -81,7 +90,7 @@ def test_remote_clock_playback_cover_staleness_and_track_switch(tmp_path, monkey
   monkeypatch.setattr(hud.time, 'time', lambda: 500000.)
   remote = hud.RemoteState(tmp_path / 'packet', tmp_path / 'art')
   state, packet, art = snapshot()
-  remote.packet_path.write_bytes(wire.HEADER.pack(10.) + packet)
+  write_snapshot(remote.packet_path, wire.HEADER.pack(10.) + packet)
   remote.art_path.write_bytes(art)
   result = remote.current()
   assert result.phone_media.title == state.phone_media.title
@@ -94,9 +103,9 @@ def test_remote_clock_playback_cover_staleness_and_track_switch(tmp_path, monkey
   tick[0] = 10.1
   next_state = replace(state, phone_media=replace(state.phone_media, title='Next', art_base64='eHl6'))
   body, _ = wire.encode_snapshot(next_state, wire.PARAM_DEFAULTS, 100.1)
-  remote.packet_path.write_bytes(wire.HEADER.pack(10.1) + wire.HEADER.pack(0.) + body)
+  write_snapshot(remote.packet_path, wire.HEADER.pack(10.1) + wire.HEADER.pack(0.) + body)
   assert remote.current().phone_media.art_base64 == ''
-  remote.packet_path.write_bytes(b'bad')
+  write_snapshot(remote.packet_path, b'bad')
   assert remote.current() == standby_state()
 
 
@@ -106,7 +115,7 @@ def test_display_params_theme_brightness_and_disconnect(tmp_path, monkeypatch):
   state, _, _ = snapshot()
   for mode, expected in ((1, 20), (2, 60), (0, 60)):
     body, _ = wire.encode_snapshot(state, {**wire.PARAM_DEFAULTS, 'ClusterHudTheme': mode, 'IsOnroad': 1}, 3 * 3600.)
-    remote.packet_path.write_bytes(wire.HEADER.pack(hud.time.monotonic()) + wire.HEADER.pack(0.) + body)
+    write_snapshot(remote.packet_path, wire.HEADER.pack(hud.time.monotonic()) + wire.HEADER.pack(0.) + body)
     params = hud.DisplayParams()
     assert hud.config.cluster_theme_brightness_percent(params.get_int('ClusterHudTheme')) == expected
     assert params.get_bool('IsOnroad')
@@ -144,6 +153,36 @@ def test_display_traffic_does_not_precede_inference_reply():
   end = body.index('replied = time.monotonic()', start)
   assert 'publish_hud(' not in body[start:end]
   assert 'publish_hud(' in body[end:]
+
+
+@pytest.mark.parametrize('component', ['packet', 'media_packet'])
+@pytest.mark.parametrize('failure', [PermissionError, OSError, ValueError])
+def test_display_generation_errors_do_not_escape_usb_owner(component, failure):
+  from openpilot.selfdrive.modeld.jetlink import daemon
+  sent = []
+  def fail():
+    raise failure('display file unavailable')
+  publisher = SimpleNamespace(packet=lambda: b'snapshot', media_packet=lambda: b'art')
+  setattr(publisher, component, fail)
+  client = SimpleNamespace(t=SimpleNamespace(send=lambda *args: sent.append(args)), _next_seq=lambda: 1)
+  daemon.publish_hud(client, publisher)
+  assert len(sent) == (component == 'media_packet')
+  # A transient display failure must not prevent the next update.
+  setattr(publisher, component, lambda: b'recovered')
+  daemon.publish_hud(client, publisher)
+  assert [item[0] for item in sent[-2:]] == [wire.HUD_MESSAGE, wire.ART_MESSAGE]
+
+
+@pytest.mark.parametrize('snapshot', [None, b'snapshot'])
+def test_real_display_transport_failures_still_escape_usb_owner(snapshot):
+  from openpilot.selfdrive.modeld.jetlink import daemon
+  from jetlink.transport.base import LinkError
+  def fail(*args):
+    raise LinkError('USB disconnected')
+  publisher = SimpleNamespace(packet=lambda: snapshot, media_packet=lambda: b'art')
+  client = SimpleNamespace(t=SimpleNamespace(send=fail), _next_seq=lambda: 1)
+  with pytest.raises(LinkError, match='USB disconnected'):
+    daemon.publish_hud(client, publisher)
 
 
 def test_upstream_boot_updater_cannot_replace_custom_runtime():
@@ -208,6 +247,7 @@ def test_framed_transport_delivers_unicode_and_art_without_losing_ping(tmp_path,
     assert result.phone_media.art_base64.encode() == art
     assert result.speed_kph == 87 and result.left_blindspot
   finally:
+    ours.shutdown(socket.SHUT_RDWR)  # Wake Linux's background socket reader before joining it.
     session.close()
     client.close()
     transport.close()

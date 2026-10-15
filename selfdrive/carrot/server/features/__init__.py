@@ -5,6 +5,7 @@ from . import (
   dashcam,
   params,
   phone_media,
+  remote_support,
   screenrecord,
   settings,
   setting_favorites,
@@ -34,6 +35,7 @@ def register_all(app: web.Application) -> None:
   ssh_keys.register(app)
   cars.register(app)
   phone_media.register(app)
+  remote_support.register(app)
   system.register(app)
   terminal.register(app)
   dashcam.register(app)

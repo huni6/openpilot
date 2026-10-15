@@ -2,8 +2,10 @@ import errno
 import hashlib
 import io
 import json
+import os
 from pathlib import Path
 import subprocess
+import sys
 import tarfile
 
 import pytest
@@ -11,6 +13,101 @@ import pytest
 import manage_jetson as client
 import setup_comma_remote as remote
 import usb_management as usb
+
+
+def test_boot_action_latches_mode_without_touching_usb(tmp_path, monkeypatch, capsys):
+  monkeypatch.setattr(usb, 'BOOT_MODE', tmp_path / 'mode')
+  monkeypatch.setattr(usb, 'ENABLED', tmp_path / 'enabled')
+  monkeypatch.setattr(usb.os, 'geteuid', lambda: 0)
+  monkeypatch.setattr(usb.os, 'fstat', lambda fd: type('Info', (), {'st_mode': 0o100600, 'st_uid': 0})())
+  monkeypatch.setattr(sys, 'argv', ['usb_management.py', 'boot'])
+  for name in ('configure', 'activate', 'detach'):
+    monkeypatch.setattr(usb, name, lambda: pytest.fail('Boot latch must not modify USB'))
+  usb.main()
+  assert json.loads(capsys.readouterr().out) == {'enabled_this_boot': False}
+
+
+@pytest.mark.parametrize('failure', [False, True])
+def test_daemon_boot_latch_is_optional_and_uses_only_fixed_action(monkeypatch, failure):
+  from openpilot.selfdrive.modeld.jetlink import mobile
+  calls = []
+  def root(*args):
+    calls.append(args)
+    if failure:
+      raise mobile.MobileLinkError('unsupported boot latch')
+  monkeypatch.setattr(mobile, '_root', root)
+  mobile.initialize_management()
+  assert calls == [('setup_gadget.sh', '--latch-management')]
+
+
+@pytest.mark.parametrize('action', ['boot', 'gadget', 'net'])
+def test_corrupt_latch_does_not_block_bulk_or_change_bound_descriptors(monkeypatch, action):
+  calls, reports = [], []
+  monkeypatch.setattr(sys, 'argv', ['usb_management.py', action])
+  monkeypatch.setattr(usb.os, 'geteuid', lambda: 0)
+  def fail():
+    raise ValueError('Invalid USB boot mode')
+  monkeypatch.setattr(usb, 'boot_enabled', fail)
+  monkeypatch.setattr(usb, 'report', lambda state, **kw: reports.append((state, kw)))
+  monkeypatch.setattr(usb, 'detach', lambda: calls.append('detach'))
+  monkeypatch.setattr(usb, 'configure', lambda: pytest.fail('No NCM on corrupt latch'))
+  monkeypatch.setattr(usb, 'activate', lambda: pytest.fail('No network changes on corrupt latch'))
+  usb.main()
+  assert calls == (['detach'] if action == 'gadget' else [])
+  assert reports == [('unavailable', {'reason': 'Invalid USB boot mode'})]
+
+
+@pytest.mark.parametrize('mode,management,expected', [('usb', True, ('--management',)),
+                                                    ('usb', False, ()), ('android', True, ())])
+def test_only_explicit_usb_can_add_management(monkeypatch, tmp_path, mode, management, expected):
+  from openpilot.selfdrive.modeld.jetlink import mobile
+  calls = []
+  monkeypatch.setattr(mobile, 'GADGET', tmp_path)
+  monkeypatch.setattr(mobile, '_root', lambda *args: calls.append(args))
+  mobile.setup_gadget(mode, management=management)
+  assert calls == [('setup_gadget.sh', *expected)]
+
+
+@pytest.mark.parametrize('enabled', [False, True])
+def test_usb_mode_changes_only_after_os_reboot(tmp_path, monkeypatch, enabled):
+  marker, latch = tmp_path / 'enabled', tmp_path / 'boot-mode'
+  monkeypatch.setattr(usb, 'ENABLED', marker)
+  monkeypatch.setattr(usb, 'BOOT_MODE', latch)
+  if enabled:
+    marker.touch()
+  assert usb.boot_enabled() is enabled
+  if enabled:
+    marker.unlink()
+  else:
+    marker.touch()
+  for _ in range(3):
+    assert usb.boot_enabled() is enabled
+  assert latch.stat().st_mode & 0o777 == 0o600
+  latch.unlink()  # /run is cleared by OS reboot, not a manager restart.
+  assert usb.boot_enabled() is not enabled
+
+
+@pytest.mark.parametrize('invalid', ['symlink', 'writable', 'content'])
+def test_usb_boot_latch_rejects_untrusted_state(tmp_path, monkeypatch, invalid):
+  latch, target = tmp_path / 'mode', tmp_path / 'target'
+  target.write_text('unchanged')
+  monkeypatch.setattr(usb, 'BOOT_MODE', latch)
+  if invalid == 'symlink':
+    latch.symlink_to(target)
+  else:
+    latch.write_text('invalid' if invalid == 'content' else '1')
+    latch.chmod(0o666 if invalid == 'writable' else 0o600)
+  with pytest.raises((OSError, ValueError)):
+    usb.boot_enabled()
+  assert target.read_text() == 'unchanged'
+
+
+def test_usb_boot_latch_rejects_foreign_owner(tmp_path, monkeypatch):
+  monkeypatch.setattr(usb, 'BOOT_MODE', tmp_path / 'mode')
+  uid = os.geteuid()
+  monkeypatch.setattr(usb.os, 'geteuid', lambda: uid + 1)
+  with pytest.raises(ValueError, match='Untrusted'):
+    usb.boot_enabled()
 
 
 @pytest.fixture
@@ -125,6 +222,45 @@ def test_detach_retains_kernel_function_without_flushing_other_addresses(gadget)
   assert not (root / 'configs/c.1' / usb.FUNCTION).exists()
   assert calls[-1] == ['ip', 'address', 'del', usb.COMMA_IP + '/30', 'dev', 'usb0']
   usb.detach(root, net, lambda args: pytest.fail('idempotent detach'))
+
+
+@pytest.mark.parametrize('failure', ['missing', 'foreign', 'invalid-name', 'bad-json', 'ip-error', 'timeout'])
+def test_optional_network_cleanup_never_blocks_owned_bulk_restart(gadget, failure):
+  root, net = gadget
+  usb.configure(root, net)
+  if failure == 'missing':
+    (net / 'usb0/address').unlink()
+  elif failure == 'foreign':
+    (net / 'usb0/address').write_text('11:22:33:44:55:66')
+  elif failure == 'invalid-name':
+    (root / 'functions' / usb.FUNCTION / 'ifname').write_text('../eth0')
+  def command(args):
+    if failure in ('missing', 'foreign', 'invalid-name'):
+      pytest.fail('Never change an unverified network device')
+    if failure == 'ip-error':
+      raise subprocess.CalledProcessError(1, args)
+    if failure == 'timeout':
+      raise subprocess.TimeoutExpired(args, 10)
+    return 'not json'
+  usb.detach(root, net, command)
+  assert not (root / 'configs/c.1' / usb.FUNCTION).exists()
+  assert (root / 'configs/c.1/ffs.jetlink').is_symlink()
+  assert (root / 'bcdDevice').read_text().strip() == '0x0100'
+
+
+@pytest.mark.parametrize('bound', [False, True])
+def test_detach_still_refuses_live_or_foreign_gadgets(gadget, bound):
+  root, net = gadget
+  usb.configure(root, net)
+  link = root / 'configs/c.1' / usb.FUNCTION
+  if bound:
+    (root / 'UDC').write_text('controller')
+  else:
+    link.unlink()
+    link.symlink_to(root / 'functions/foreign')
+  with pytest.raises(ValueError):
+    usb.detach(root, net, lambda args: pytest.fail('No network changes'))
+  assert link.is_symlink()
 
 
 @pytest.mark.parametrize('route', [[], [dict(dev='wlan0', gateway='192.168.1.1', prefsrc=usb.COMMA_IP)],

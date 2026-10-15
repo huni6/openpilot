@@ -19,6 +19,7 @@ SPEC = DEFAULT_SPEC
 SOCKET = '/dev/shm/carrot-jetlink.sock'
 STATUS = Path('/dev/shm/carrot-jetlink.json')
 FAULT = Path('/dev/shm/carrot-jetlink-fault')
+FAULT_HOLD_SECONDS = 5.
 REQUEST = struct.Struct('<IIQ')
 REPLY = struct.Struct('<I3I')
 MAX_PACKET = 1 << 20
@@ -128,7 +129,7 @@ def validate_spec(spec):
 
 def fault_active():
   try:
-    return 0 <= time.monotonic() - float(FAULT.read_text()) < 5
+    return 0 <= time.monotonic() - float(FAULT.read_text()) < FAULT_HOLD_SECONDS
   except (OSError, ValueError):
     return False
 
@@ -170,6 +171,21 @@ class Client:
   def close(self):
     self.sock.close()
 
+  def warmup(self, cancelled):
+    # Warm the transport/remote engine on the handshake worker. The first
+    # real frame still resets all remote recurrent history.
+    images = np.zeros(self.spec.warped_shape, np.uint8)
+    packed = np.zeros(self.spec.packed_nelem, np.float32)
+    offset = 0
+    for name, size in zip(self.spec.packed_shapes, self.spec.packed_sizes, strict=True):
+      if name == 'traffic_convention':
+        packed[offset] = 1
+      offset += size
+    for frame in range(3):
+      if cancelled():
+        return
+      self.infer(images, packed, frame, reset=True)
+
 
 class ClientConnection:
   """One bounded handshake, without waiting on the camera inference thread."""
@@ -184,16 +200,25 @@ class ClientConnection:
       # A thread otherwise inherits modeld's realtime scheduling policy.
       if hasattr(os, 'sched_setscheduler'):
         os.sched_setscheduler(0, os.SCHED_OTHER, os.sched_param(0))
+      if hasattr(os, 'sched_setaffinity'):
+        os.sched_setaffinity(0, {0, 1, 2})
       client = Client()
+      client.warmup(future.cancelled)
       future.set_result(client)
+      client = None  # Ownership passed to modeld.
     except InvalidStateError:
-      if client is not None:
-        client.close()  # The join opportunity expired during the handshake.
+      pass
     except Exception as exc:
       try:
         future.set_exception(exc)
       except InvalidStateError:
         pass
+    finally:
+      if client is not None:
+        try:
+          client.close()
+        except OSError:
+          pass
 
   def close(self):
     if not self.future.cancel():

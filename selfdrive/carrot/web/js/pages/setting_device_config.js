@@ -8,6 +8,8 @@ const DEVICE_GROUPS = [
   { id: "Network", labelKey: "device_group_network", defaultLabel: "Network" },
   { id: "Toggles", labelKey: "device_group_toggles", defaultLabel: "Toggles" },
   { id: "Software", labelKey: "device_group_software", defaultLabel: "Software" },
+  { id: "RemoteSupport", labelKey: "device_group_remote_support", defaultLabel: "원격지원" },
+  { id: "Jetson", labelKey: "device_group_jetson", defaultLabel: "Jetson" },
   { id: "Developer", labelKey: "device_group_developer", defaultLabel: "Developer" },
 ];
 

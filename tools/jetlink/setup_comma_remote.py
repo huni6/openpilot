@@ -137,6 +137,14 @@ def login_args():
                      '--advertise-routes=', '--exit-node=', '--advertise-exit-node=false')
 
 
+def background_priority():
+  # Called only by AGNOS CLI helpers. Their downloads/service checks are not
+  # part of a driving deadline; children inherit this placement and priority.
+  os.sched_setscheduler(0, os.SCHED_OTHER, os.sched_param(0))
+  os.sched_setaffinity(0, {0, 1})
+  os.nice(10)
+
+
 def main():
   parser = argparse.ArgumentParser(description=__doc__)
   parser.add_argument('action', choices=('install', 'start', 'login', 'status', 'disable'))
@@ -144,6 +152,7 @@ def main():
   args = parser.parse_args()
   if os.geteuid() != 0:
     parser.error('Run with sudo on the comma')
+  background_priority()
   if args.action == 'install':
     if not args.confirm_parked:
       parser.error('Park and turn ignition off, then pass --confirm-parked')

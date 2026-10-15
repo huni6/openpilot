@@ -1,15 +1,18 @@
 """Opt-in USB management network, separate from the Jetlink bulk interface."""
 import argparse
 import errno
+import fcntl
 import json
 import os
 from pathlib import Path
 import re
+import stat
 import subprocess
 
 GADGET = Path('/sys/kernel/config/usb_gadget/jetlink')
 NET = Path('/sys/class/net')
 ENABLED = Path('/data/hl-jetson/usb-management.enabled')
+BOOT_MODE = Path('/run/hl-jetson-usb-mode')
 STATUS = Path('/dev/shm/hl-jetson-usb.json')
 FUNCTION = 'ncm.hlmaint'
 COMMA_IP = '169.254.77.2'
@@ -28,6 +31,26 @@ def report(state, **extra):
   temporary = STATUS.with_suffix('.new')
   temporary.write_text(json.dumps(dict(state=state, **extra)))
   temporary.replace(STATUS)
+
+
+def boot_enabled():
+  # /run survives USB/manager restarts, but not an OS reboot. Never hot-apply
+  # a web setting by changing the inference device's USB descriptors.
+  fd = os.open(BOOT_MODE, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+  with os.fdopen(fd, 'r+b') as stream:
+    info = os.fstat(stream.fileno())
+    if not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid() or info.st_mode & 0o022:
+      raise ValueError('Untrusted USB boot mode file')
+    fcntl.flock(stream, fcntl.LOCK_EX)
+    mode = stream.read(3)
+    if not mode:
+      mode = b'1' if ENABLED.is_file() else b'0'
+      stream.write(mode)
+      stream.flush()
+      os.fsync(stream.fileno())
+    if mode not in (b'0', b'1'):
+      raise ValueError('Invalid USB boot mode')
+    return mode == b'1'
 
 
 def netdev(gadget=GADGET, net=NET):
@@ -61,12 +84,12 @@ def detach(gadget=GADGET, net=NET, command=run):
     raise ValueError('Unexpected management function link')
   try:
     name = netdev(gadget, net)
-  except OSError as error:
-    if error.errno not in (errno.ENODEV, errno.ENOENT):
-      raise
-  else:
     # Old AGNOS destroys this netdev at unbind. Otherwise remove only our IP.
     remove_address(name, command)
+  except (OSError, ValueError, TypeError, AttributeError, subprocess.SubprocessError) as error:
+    # Ownership and unbound-UDC checks above remain fatal. A missing/foreign
+    # netdev or failed IP cleanup must not prevent bulk-only inference startup.
+    print('USB management network cleanup skipped: ' + str(error))
   link.unlink()
   # Retain the detached function: old AGNOS kernels can fault on configfs rmdir.
   for attr, value in (('bDeviceClass', '0x00'), ('bDeviceSubClass', '0x00'),
@@ -227,23 +250,35 @@ def install_host(root=Path('/'), command=run):
 
 def main():
   parser = argparse.ArgumentParser(description=__doc__)
-  parser.add_argument('action', choices=('gadget', 'net', 'detach', 'install-host'))
+  parser.add_argument('action', choices=('boot', 'gadget', 'net', 'detach', 'install-host'))
   args = parser.parse_args()
   if os.geteuid() != 0:
     parser.error('Run through sudo')
   if args.action == 'install-host':
     print(json.dumps(install_host()))
+    return
   elif args.action == 'detach':
     detach()
+    return
+  try:
+    enabled = boot_enabled()
+  except (OSError, ValueError) as error:
+    report('unavailable', reason=str(error))
+    if args.action == 'gadget':
+      detach()  # Still refuses a bound controller or a foreign function link.
+    print('USB management boot mode unavailable; keeping bulk inference: ' + str(error))
+    return
+  if args.action == 'boot':
+    print(json.dumps(dict(enabled_this_boot=enabled)))
   elif args.action == 'net':
-    if ENABLED.is_file():
+    if enabled:
       try:
         name = activate()
         report('configured', interface=name, address=COMMA_IP, peer=JETSON_IP)
       except Exception as error:
         report('unavailable', reason=str(error))
         print('USB management unavailable; keeping bulk inference: ' + str(error))
-  elif ENABLED.is_file():
+  elif enabled:
     try:
       configure()
       report('prepared')

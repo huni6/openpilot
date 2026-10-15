@@ -94,7 +94,7 @@ def _root(script, *args):
     raise MobileLinkError(f'{script} unavailable: {exc}') from exc
 
 
-def setup_gadget(mode=None):
+def setup_gadget(mode=None, management=True):
   """Configure the selected functions before ep0/UDC binding."""
   mode = transport_mode() if mode is None else transport_mode({'JETLINK_TRANSPORT': mode})
   if mode in ('auto', 'ios'):
@@ -105,7 +105,7 @@ def setup_gadget(mode=None):
       # A retained, detached NCM function requires no further teardown.
       # The helper refuses bound/unowned NCM rather than altering another owner.
       teardown_gadget()
-    _root('setup_gadget.sh', *(['--management'] if mode == 'usb' else []))
+    _root('setup_gadget.sh', *(['--management'] if mode == 'usb' and management else []))
   return mode
 
 
@@ -120,6 +120,14 @@ def activate_management():
     _root('setup_gadget.sh', '--activate-management')
   except MobileLinkError as exc:
     log.warning('USB management unavailable: %s', exc)
+
+
+def initialize_management():
+  """Latch settings before any cable is attached; do not touch USB here."""
+  try:
+    _root('setup_gadget.sh', '--latch-management')
+  except MobileLinkError as exc:
+    log.warning('USB management boot mode unavailable: %s', exc)
 
 
 def _timeout(value):
