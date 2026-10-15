@@ -38,7 +38,7 @@ def netdev(gadget=GADGET, net=NET):
   name = (gadget / 'functions' / FUNCTION / 'ifname').read_text().strip()
   if not re.fullmatch(r'[a-zA-Z0-9_.-]{1,15}', name):
     raise ValueError('Invalid management interface name')
-  mac = (function / 'dev_addr').read_text().strip().lower()
+  mac = (function / 'dev_addr').read_text().strip('\x00\r\n ').lower()
   if not re.fullmatch(r'(?:[0-9a-f]{2}:){5}[0-9a-f]{2}', mac) or (net / name / 'address').read_text().strip().lower() != mac:
     raise ValueError('Management interface MAC does not match; refusing network changes')
   return name

@@ -138,7 +138,7 @@ def test_usb_candidate_requires_owned_function_and_link_carrier(gadget):
   root, net = gadget
   usb.configure(root, net)
   (root / 'UDC').write_text('controller')
-  (root / 'functions' / usb.FUNCTION / 'dev_addr').write_text('02:12:34:56:78:90')
+  (root / 'functions' / usb.FUNCTION / 'dev_addr').write_text('02:12:34:56:78:90\x00')
   (net / 'usb0/address').write_text('02:12:34:56:78:90')
   def command(args):
     return json.dumps([dict(dev='usb0', prefsrc=usb.COMMA_IP)])
