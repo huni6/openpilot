@@ -131,9 +131,16 @@ sudo python3 tools/jetlink/setup_comma_remote.py disable
 6. Run managed updates only parked with fresh offroad state. Automatic rollout
    remains disabled until the separate maintenance checklist passes.
 
-Validated here: software tests and the connected Jetson's profile persistence.
-Not yet validated: the absent comma's USB endpoints, Tailscale enrollment, remote
-end-to-end SSH, or inference/display concurrency over the composite USB gadget.
+On 2026-10-15 the actual C4/AGNOS 18.4 and carrot-jetson R2 pair passed USB SSH,
+reboot persistence, the existing comma Tailscale SSH hop, managed install,
+rollback/reinstall, unchanged-content skipping, and 1,200 synthetic inference
+frames at 20 Hz (32.9 ms mean, 36.8 ms p95, one frame over 50 ms). Fresh HUD
+snapshots arrived over the same USB link. Native Jetson GPU renders of dark/light
+1920x480 fixtures matched local/transported state pixel-for-pixel.
+
+TURZX was absent: real panel output, sustained display/inference concurrency,
+vehicle camera inputs, live phone media, driving and a different-Internet VPN
+path remain unverified. Automatic rollout and USB-only updates remain disabled.
 
 Official static installation documentation:
 <https://tailscale.com/docs/install/linux#static-binaries>.
