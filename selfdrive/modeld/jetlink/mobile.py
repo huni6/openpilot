@@ -114,6 +114,14 @@ def teardown_gadget():
   _root('setup_mobile.sh', '--teardown')
 
 
+def activate_management():
+  """Optional management failures must never tear down working bulk inference."""
+  try:
+    _root('setup_gadget.sh', '--activate-management')
+  except MobileLinkError as exc:
+    log.warning('USB management unavailable: %s', exc)
+
+
 def _timeout(value):
   if isinstance(value, bool) or not isinstance(value, (float, int)) or not math.isfinite(value) or value <= 0:
     raise ValueError('timeout must be a finite positive number')

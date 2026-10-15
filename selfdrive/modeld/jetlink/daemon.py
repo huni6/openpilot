@@ -17,7 +17,7 @@ from openpilot.selfdrive.modeld.jetlink.link import (SOCKET, STATUS, REQUEST, RE
 from openpilot.selfdrive.modeld.jetlink.phase import Publisher as PhasePublisher
 from openpilot.selfdrive.modeld.jetlink.mac import prepare, PreparationDeferred
 from openpilot.selfdrive.modeld.jetlink.compat import ProtocolChoice
-from openpilot.selfdrive.modeld.jetlink.mobile import transport_mode, setup_gadget, MobileCable, AutoTransport, MobileLinkError
+from openpilot.selfdrive.modeld.jetlink.mobile import transport_mode, setup_gadget, activate_management, MobileCable, AutoTransport, MobileLinkError
 from openpilot.selfdrive.modeld.jetlink.contracts import model_name
 from openpilot.selfdrive.modeld.jetlink.selection import ModelChanged, check_loaded
 from openpilot.selfdrive.modeld.jetlink.startup import CAPABILITY as BOOT_UPDATE_CAPABILITY, wait_for_boot_update
@@ -390,6 +390,8 @@ def main():
           setup_gadget('usb' if mobile_unavailable else TRANSPORT_MODE)
           udc = next(Path('/sys/class/udc').iterdir()).name
           owner = CarrotTransport('/dev/ffs-jetlink', gadget=GADGET, udc=udc)
+          if TRANSPORT_MODE == 'usb':
+            activate_management()
           if TRANSPORT_MODE in ('auto', 'ios') and not mobile_unavailable:
             cable = MobileCable(owner)
             cable.start()

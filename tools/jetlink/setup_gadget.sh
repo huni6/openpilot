@@ -18,6 +18,10 @@
 set -euo pipefail
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 
+if [[ "${1:-}" == "--activate-management" ]]; then
+  exec python3 "$SCRIPT_DIR/usb_management.py" net
+fi
+
 GADGET=/sys/kernel/config/usb_gadget/jetlink
 FFS_MOUNT=${FFS_MOUNT:-/dev/ffs-jetlink}
 FFS_NAME=jetlink

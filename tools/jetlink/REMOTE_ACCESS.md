@@ -14,8 +14,8 @@ own VPN or Internet connection for USB SSH. This is an SSH jump-host arrangement
 not an exit node, advertised LAN route, bridged Wi-Fi, or USB role reversal.
 Jetson remains the USB host. The existing C-to-C host policy stays installed.
 
-USB management is opt-in because the actual comma kernel must support CDC-NCM,
-fixed function MAC addresses, and the extra composite endpoints. Configuration
+USB management is opt-in because the actual comma kernel must support CDC-NCM
+and the extra composite endpoints. Configuration
 failure records `/dev/shm/hl-jetson-usb.json` and leaves the bulk-only gadget when
 cleanup succeeds. No live gadget is unbound to enable the feature. Enable it only
 offroad and verify SuperSpeed, inference and TURZX before driving. Unexpected
@@ -34,7 +34,12 @@ proving service restart, reconnection and recovery on the actual pair, run
 
 ## One-Time Setup
 
-On the prepared carrot-jetson host, via its already authenticated SSH account:
+First enable USB management on comma (below), disable ADB, and reboot offroad
+with the Jetson USB cable attached. Network configuration runs after FunctionFS
+binds the controller: AGNOS 4.9 exposes NCM interface/MAC attributes only then.
+Kernel-generated MAC addresses are supported; fixed MACs are not required.
+
+On the prepared carrot-jetson host, via its already authenticated LAN SSH account:
 
 ```sh
 sudo python3 /tmp/usb_management.py install-host
@@ -42,11 +47,16 @@ sudo python3 /tmp/usb_management.py install-host
 
 Copy this repository's `tools/jetlink/usb_management.py` to that path first. This
 adds only `hl-jetson-usb.nmconnection` and invokes the image's protected identity
-save. Existing Wi-Fi profiles and keys are preserved. The profile matches the
-management MAC `02:48:4c:77:00:01`, uses `169.254.77.1/30`, never supplies a
+save. Existing Wi-Fi profiles and keys are preserved. The installer requires one
+CDC-NCM interface under USB `1209:0001`, revision `0102`. Its profile matches the
+exact USB port path plus `cdc_ncm` driver, uses `169.254.77.1/30`, never supplies a
 default route, and survives the image's volatile `/etc` overlay. No SSD reflash,
 root-filesystem remount, upstream service replacement, or inference restart is
 needed. Remove this profile and run `protected_storage.py save` to undo it.
+Keep using that Jetson USB port (and hub topology). Moving the cable to a different
+port requires reviewing/removing this profile and running `install-host` again
+over LAN. An exact legacy fixed-MAC profile migrates automatically; customized
+profiles are refused rather than overwritten.
 
 On the intended comma checkout, with ignition off:
 
@@ -70,7 +80,7 @@ python3 tools/jetlink/manage_jetson.py shell
 ```
 
 The existing LAN pairing procedure works too. Once paired, management tries a
-direct USB route with the correct source address, MAC and carrier before trying
+direct USB route with the correct source address, owned NCM function/MAC and carrier before trying
 fresh USB-reported LAN addresses and saved LAN addresses. A stale USB address is
 never sent through Wi-Fi's default gateway. Host-key pinning applies to both
 paths. First pairing and real SSH login are mandatory; an IP is not identity.
