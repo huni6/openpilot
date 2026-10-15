@@ -85,6 +85,9 @@ def configure(gadget=GADGET, net=NET, command=run):
       (function / attr).write_text(value + '\n')
       if (function / attr).read_text().strip().lower() != value:
         raise ValueError('Kernel cannot retain fixed USB management MAC addresses')
+    # AGNOS registers the NCM netdev when linked; ifname raises ENODEV before that.
+    if not link.is_symlink():
+      link.symlink_to(function)
     name = netdev(gadget, net)
     command(['nmcli', 'device', 'set', name, 'managed', 'no'])
     command(['ip', 'address', 'replace', COMMA_IP + '/30', 'dev', name])
@@ -92,8 +95,6 @@ def configure(gadget=GADGET, net=NET, command=run):
     for attr, value in (('bDeviceClass', '0xEF'), ('bDeviceSubClass', '0x02'),
                         ('bDeviceProtocol', '0x01'), ('bcdDevice', '0x0102')):
       (gadget / attr).write_text(value + '\n')
-    if not link.is_symlink():
-      link.symlink_to(function)
     return name
   except Exception:
     if link.is_symlink() and link.resolve() == function.resolve():

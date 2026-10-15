@@ -49,6 +49,17 @@ def test_bound_gadget_is_never_modified(gadget):
   assert not (root / 'configs/c.1' / usb.FUNCTION).exists()
 
 
+def test_ncm_is_linked_before_reading_kernel_interface(gadget, monkeypatch):
+  root, net = gadget
+  original = usb.netdev
+  def linked_netdev(gadget, net):
+    assert (gadget / 'configs/c.1' / usb.FUNCTION).is_symlink()
+    assert not (gadget / 'UDC').read_text().strip()
+    return original(gadget, net)
+  monkeypatch.setattr(usb, 'netdev', linked_netdev)
+  assert usb.configure(root, net, lambda args: '') == 'usb0'
+
+
 def test_mobile_mode_cannot_share_management_function(gadget):
   root, net = gadget
   (root / 'configs/c.1/ncm.jetlink').symlink_to(root / 'functions/ncm.jetlink')

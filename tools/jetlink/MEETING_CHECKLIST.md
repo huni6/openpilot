@@ -57,6 +57,11 @@ and an actual SSH login. The SSD operation alone cannot install the runtime.
 
 ## 2. Pair the Actual Devices
 
+Turn off comma USB debugging (`AdbEnabled`) through the normal setting before
+using Jetlink USB. AGNOS's ADB/NCM gadget `g1` otherwise owns the controller;
+Jetlink deliberately refuses to unbind an unrelated gadget. Verify Wi-Fi SSH
+access first. Disabling ADB does not disable ordinary Wi-Fi/Tailscale SSH.
+
 Connect both devices to the recipient's usual hotspot. Verify comma can reach
 Jetson, not just that the Mac can reach each device. Hotspot client isolation can
 block peer traffic. Confirm the actual Jetson address before accepting its first
