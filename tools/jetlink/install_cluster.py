@@ -112,6 +112,12 @@ def prepare_release(runtime, previous, bundle, expected_sha256, probe):
         if not dest.resolve().is_relative_to(candidate.resolve()):
           raise ValueError('Upstream path redirects outside release')
         dest.parent.mkdir(parents=True, exist_ok=True)
+        # The root maintenance worker uses umask 077; jetlink must traverse
+        # newly added code/asset directories in this immutable release.
+        for parent in (dest.parent, *dest.parent.parents):
+          if parent == candidate:
+            break
+          parent.chmod(0o755)
         shutil.copyfile(source, dest)
         dest.chmod(0o644)
     candidate.chmod(0o755)

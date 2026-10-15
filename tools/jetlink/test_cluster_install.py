@@ -1,6 +1,7 @@
 import hashlib
 import io
 import json
+import os
 import subprocess
 import sys
 import tarfile
@@ -13,7 +14,8 @@ import install_cluster as installer
 
 def bundle_at(tmp_path):
   guard = Path(__file__).with_name('update_guard.py').read_bytes()
-  files = {'tools/jetlink/server.py': b'# custom', 'tools/jetlink/update_guard.py': guard}
+  files = {'tools/jetlink/server.py': b'# custom', 'tools/jetlink/update_guard.py': guard,
+           'selfdrive/carrot/cluster/cluster_models.py': b'# models'}
   sums = {name: hashlib.sha256(data).hexdigest() for name, data in files.items()}
   identity = hashlib.sha256(json.dumps(sums, sort_keys=True).encode()).hexdigest()
   files['HL_CLUSTER_MANIFEST.json'] = json.dumps(dict(format=1, branch='cluster_jetson', files=sums,
@@ -73,6 +75,22 @@ def test_failed_probe_leaves_selection_and_updater_intact(tmp_path, monkeypatch)
   assert (runtime / 'current').resolve() == runtime / 'releases/original'
   assert (runtime / 'updater/update_host.py').read_text() == 'original'
   assert not (runtime / 'HL_CLUSTER_PIN.json').exists()
+
+
+def test_restrictive_worker_umask_keeps_overlay_traversable(tmp_path, monkeypatch):
+  monkeypatch.setattr(installer.os, 'sync', lambda: None)
+  runtime = runtime_at(tmp_path)
+  bundle, digest = bundle_at(tmp_path)
+  def probe(candidate):
+    for path in (candidate.parent, candidate, candidate / 'selfdrive',
+                 candidate / 'selfdrive/carrot', candidate / 'selfdrive/carrot/cluster'):
+      assert path.stat().st_mode & 0o777 == 0o755
+    assert (candidate / 'selfdrive/carrot/cluster/cluster_models.py').stat().st_mode & 0o777 == 0o644
+  mask = os.umask(0o077)
+  try:
+    installer.install(runtime, bundle, digest, probe)
+  finally:
+    os.umask(mask)
 
 
 def test_same_bundle_reinstall_after_rollback_preserves_retained_release(tmp_path, monkeypatch):
