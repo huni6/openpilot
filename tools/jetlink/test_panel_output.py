@@ -2,6 +2,8 @@
 from contextlib import nullcontext
 import fcntl
 import sys
+import threading
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -86,6 +88,7 @@ def test_boot_usb_guard_survives_legacy_lock_removal(tmp_path):
     assert acquired
     # Model logind cleanup while the HUD still holds the now-unlinked inode.
     (legacy / 'owner.lock').unlink()
+    (legacy / 'hud-request').unlink()
     legacy.rmdir()
     with display_owner.panel_owner(directory=legacy, boot_usb_lock=boot_lock) as boot_owner:
       assert boot_owner  # The old ownership file alone no longer protects USB.
@@ -111,3 +114,49 @@ def test_exception_releases_both_locks(tmp_path):
       raise RuntimeError('renderer failed')
   with display_owner.panel_owner(hud=True, directory=legacy, boot_usb_lock=boot_lock) as acquired:
     assert acquired
+
+
+def test_replaced_boot_owner_finishes_usb_close_before_hud(monkeypatch, tmp_path):
+  legacy = tmp_path / 'shm'
+  legacy.mkdir()
+  old_path = tmp_path / 'old-boot-owner'
+  old_path.touch()
+  boot_lock = tmp_path / 'run/usb.lock'
+  boot_lock.parent.mkdir()
+  ready, closed = threading.Event(), threading.Event()
+  monkeypatch.setattr(display_owner, 'legacy_boot_owner_paths', lambda directory: iter([old_path]))
+
+  def boot():
+    with old_path.open('a') as owner:
+      fcntl.flock(owner, fcntl.LOCK_EX)
+      ready.set()
+      deadline = time.monotonic() + 3
+      while not display_owner.hud_requested(legacy) and time.monotonic() < deadline:
+        time.sleep(.01)
+      # Simulate the boot driver's final USB call while still owning the old
+      # (deleted in production) inode. The HUD must not lock the bus before it.
+      with boot_lock.open('a') as bus:
+        fcntl.flock(bus, fcntl.LOCK_EX)
+        closed.set()
+
+  worker = threading.Thread(target=boot, daemon=True)
+  worker.start()
+  assert ready.wait(1)
+  with display_owner.panel_owner(hud=True, directory=legacy, boot_usb_lock=boot_lock) as acquired:
+    assert acquired and closed.is_set()
+    assert display_owner.hud_requested(legacy)
+  worker.join(1)
+  assert not worker.is_alive()
+  assert not display_owner.hud_requested(legacy)
+
+
+def test_boot_descriptor_lookup_is_limited_to_legacy_renderer(tmp_path):
+  legacy = tmp_path / 'shm'
+  process = tmp_path / 'proc/123'
+  (process / 'fd').mkdir(parents=True)
+  (process / 'cmdline').write_bytes(b'python\0' + display_owner.BOOT_SCRIPT + b'\0')
+  descriptor = process / 'fd/3'
+  descriptor.symlink_to(str(legacy / 'owner.lock') + ' (deleted)')
+  assert list(display_owner.legacy_boot_owner_paths(legacy, tmp_path / 'proc')) == [descriptor]
+  (process / 'cmdline').write_bytes(b'python\0unrelated.py\0')
+  assert list(display_owner.legacy_boot_owner_paths(legacy, tmp_path / 'proc')) == []
