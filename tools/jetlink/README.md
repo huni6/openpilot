@@ -1,8 +1,20 @@
 # cluster_jetson
 
 This branch adds Jetlink inference to the existing fix5 comma code and runs its
-original 1920x480 ambient instrument cluster on a Jetson-connected TURZX USB
+original 1920x480 ambient instrument cluster layout on a Jetson-connected TURZX USB
 display. Car control, CAN, driver monitoring and CarrotLink remain on comma.
+
+The design coordinates stay 1920x480, but USB output uses the detected panel's
+native dimensions (1920x462 for PID 0092, 1920x720 for PID 0123). Do not force
+480 output rows for the 9.2-inch panel. For a one-frame transport diagnosis, set
+`CLUSTER_JPEG_CAPTURE` to a writable absolute `.jpg` path before starting the
+HUD. This saves the actual portrait JPEG once; it is disabled by default.
+
+On protected images the HUD also holds the boot renderer's dedicated
+`/run/carrot-jetlink-display/usb.lock`. This survives SSH logout cleanup of
+legacy `/dev/shm` ownership files without modifying the read-only boot renderer
+or taking the inference USB lock. Recheck this contract if the HUD USB driver
+is replaced with one that also acquires that boot-only lock.
 
 ## Target
 

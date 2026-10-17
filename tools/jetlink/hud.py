@@ -3,6 +3,8 @@ from dataclasses import replace
 import hashlib
 import json
 import math
+import os
+from pathlib import Path
 import struct
 import sys
 import time
@@ -154,16 +156,27 @@ def main():
   cluster.kst_clock_text = lambda **kw: config.kst_clock_text(now=REMOTE.wall_time(), **kw)
 
   original = cluster.TuringUsbDisplay.send_jpeg
+  capture_path = os.environ.get('CLUSTER_JPEG_CAPTURE', '')
 
   def send_jpeg(display, frame):
+    nonlocal capture_path
     original(display, frame)
+    if capture_path and display._frame_error_count == 0:
+      # Opt-in, one frame only: retain the exact USB JPEG, not a second render.
+      path, capture_path = Path(capture_path), ''
+      try:
+        atomic_write(path, frame)
+        print(f'Cluster USB JPEG captured: {path}', flush=True)
+      except OSError as exc:
+        print(f'Cluster USB JPEG capture failed: {exc}', flush=True)
     if REMOTE.refresh() and display._frame_error_count == 0:
       atomic_write(HUD_STATUS, json.dumps({'updated': time.monotonic()}).encode())
 
   cluster.TuringUsbDisplay.send_jpeg = send_jpeg
   extra = sys.argv[1:]
+  # The layout scales from 1920x480; USB frames must use the detected panel size.
   sys.argv = [sys.argv[0], '--input', 'live', '--live-no-can', '--output', 'usb', '--usb-codec', 'jpeg',
-              '--width', '1920', '--height', '480', '--fps', '10', '--cluster-hud-mode', str(mode), *extra]
+              '--fps', '10', '--cluster-hud-mode', str(mode), *extra]
   if '--help' in sys.argv:
     cluster.main()
   else:

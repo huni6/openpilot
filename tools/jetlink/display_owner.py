@@ -7,6 +7,7 @@ import time
 
 # Runtime updates also work on legacy images without a new systemd drop-in.
 DIRECTORY = Path('/dev/shm') / ('carrot-jetlink-display-' + str(getattr(os, 'getuid', lambda: 0)()))
+BOOT_USB_LOCK = Path('/run/carrot-jetlink-display/usb.lock')
 
 
 def process_identity(pid):
@@ -27,12 +28,13 @@ def hud_requested(directory=DIRECTORY):
 
 
 @contextmanager
-def panel_owner(hud=False, directory=DIRECTORY):
+def panel_owner(hud=False, directory=DIRECTORY, boot_usb_lock=BOOT_USB_LOCK):
   import fcntl
   directory.mkdir(mode=0o700, parents=True, exist_ok=True)
   request = directory / 'hud-request'
   lock = (directory / 'owner.lock').open('a')
   acquired = False
+  boot_guard = None
   try:
     if hud:
       temporary = request.with_suffix('.new')
@@ -51,6 +53,13 @@ def panel_owner(hud=False, directory=DIRECTORY):
         time.sleep(.1)
     if hud:
       request.unlink(missing_ok=True)
+    if hud and acquired and boot_usb_lock.parent.is_dir():
+      # Protected images keep a separate boot renderer in the read-only OS.
+      # Its USB calls use this lock. Hold it for the entire HUD lifetime so
+      # logind removing the legacy /dev/shm lock cannot create two USB owners.
+      # The HUD driver itself does not acquire this boot-only bus lock.
+      boot_guard = boot_usb_lock.open('a')
+      fcntl.flock(boot_guard, fcntl.LOCK_EX)
     yield acquired
   finally:
     if hud:
@@ -58,3 +67,6 @@ def panel_owner(hud=False, directory=DIRECTORY):
     if acquired:
       fcntl.flock(lock, fcntl.LOCK_UN)
     lock.close()
+    if boot_guard is not None:
+      fcntl.flock(boot_guard, fcntl.LOCK_UN)
+      boot_guard.close()
