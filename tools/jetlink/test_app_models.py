@@ -333,9 +333,12 @@ def test_joining_model_uses_selected_buffers_parser_and_recurrence(tmp_path, mon
   inputs = {'desire_pulse': np.zeros(8, np.float32), 'traffic_convention': np.array([1, 0], np.float32),
             'action_t': np.array([.2, .3], np.float32)}
   assert joining.run({}, {}, inputs, False) == {'fallback': True}
-  for _ in range(2):
-    output = joining.run({}, {}, inputs, False)
-    assert output['plan'].shape == (1, 33, 15)
+  for prepare_only in (False, True, False):
+    output = joining.run({}, {}, inputs, prepare_only)
+    if prepare_only:
+      assert output is None
+    else:
+      assert output['plan'].shape == (1, 33, 15)
   assert joining.active and joining.spec.sha256 == spec.sha256 and not closed
   def failed(*a, **kw):
     raise ConnectionError('App replaced its engine')

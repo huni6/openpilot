@@ -288,8 +288,9 @@ class JoiningModel:
           self.active = True
           self.error = ''
           self.next_status = 0
-        # As in the generic eGPU runtime, run the full recurrent graph for each
-        # received pair. Camera gaps still propagate unchanged into pose validity.
+        # Remote recurrence is fused with inference, so still advance and validate
+        # it on gap frames. Match the native prepare-only publication contract
+        # below without clearing faults or marking skipped outputs as valid.
         parsed = parse_outputs(self.parser, self.spec, result)
         if os.getenv('SEND_RAW_PRED'):
           parsed['raw_pred'] = result.copy()
@@ -300,7 +301,7 @@ class JoiningModel:
                            'roundtrip %.2f, parse %.2f ms; server gpu/queue/total %.2f/%.2f/%.2f ms',
                            self.frame, (warped-started)*1000, *(v*1000 for v in self.warp.timings),
                            (replied-warped)*1000, (finished-replied)*1000, *(v/1000 for v in self.client.timings))
-        return parsed
+        return None if prepare_only else parsed
       except Exception as exc:
         cloudlog.exception('Jetlink failed; restoring local model')
         self.error = str(exc)
