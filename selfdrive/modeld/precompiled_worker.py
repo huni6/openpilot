@@ -74,6 +74,9 @@ def main():
     os.environ.update(FLOAT16='1', TC_OPT='2', TC_MIN_GLOBALS='32')
     if manifest.get('serialization') == 'persistent-buffer-v1':
       os.environ['OPENPILOT_HACKS'] = '1'
+  # Before any AMD driver import: use the verified firmware stored with this artifact.
+  from openpilot.selfdrive.modeld.egpu_firmware import install_fetch_hook
+  install_fetch_hook(pkl.parent)
   if not generic:
     import model_runtime
   from tinygrad import Device, Tensor

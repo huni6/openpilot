@@ -82,7 +82,7 @@ function renderEgpuPanel() {
     <form id="egpuLibrary" class="remote-support__form">
       <label for="egpuModelSelect">모델</label>
       <select id="egpuModelSelect" class="input-text device-select" disabled></select>
-      <p id="egpuModelHelp" class="remote-support__message">고르면 다음 부팅 선택으로 저장됩니다. 주차·시동 OFF 상태에서 인터넷을 연결하고 콤마를 재부팅하면 적용됩니다. 처음 쓰는 모델은 약 0.8GB를 내려받고 eGPU에서 시험 계산을 한 번 합니다. N16만 내비 입력(NOO)을 지원합니다. 내장 모델은 그대로 남아 eGPU가 없거나 실패하면 자동으로 씁니다.</p>
+      <p id="egpuModelHelp" class="remote-support__message">고르면 다음 부팅 선택으로 저장됩니다. 주차한 채 시동을 켜(eGPU 전원) 인터넷을 연결하고 콤마를 재부팅하면 적용됩니다. 처음 쓰는 모델은 약 0.8GB와 GPU 펌웨어를 내려받고 eGPU에서 시험 계산을 한 번 합니다. 이 브랜치에는 내비 입력(NOO) 연결이 없어서 N16도 내비 정보 없이 일반 주행 모델로 동작합니다. 내장 모델은 그대로 남아 eGPU가 없거나 실패하면 자동으로 씁니다.</p>
     </form>
     <p id="egpuOperation" class="remote-support__message" role="status" aria-live="polite"></p>
     <div class="remote-support__actions">
@@ -100,13 +100,13 @@ function egpuPanelActive() {
 function renderEgpuLibrary(library) {
   const select = document.getElementById("egpuModelSelect");
   if (!select || !library?.models) return;
-  const signature = JSON.stringify([library.models.map((m) => [m.id, m.name, m.noo]), library.selected]);
+  const signature = JSON.stringify([library.models.map((m) => [m.id, m.name]), library.selected]);
   if (select.dataset.signature !== signature) {
     select.dataset.signature = signature;
     select.replaceChildren(...library.models.map((model) => {
       const option = document.createElement("option");
       option.value = model.id;
-      option.textContent = `${model.name} · ${model.noo ? "내비 입력 지원" : "내비 입력 없음"}`;
+      option.textContent = model.name;
       return option;
     }));
   }
@@ -129,7 +129,7 @@ function updateEgpuPanel(value) {
     egpuText("egpuActive", "내장 모델");
     egpuText("egpuInstall", "-");
     egpuText("egpuProgress", "-");
-    egpuText("egpuDetail", "eGPU를 연결하고 시동을 켜면 선택한 모델을 내려받아 설치합니다. 미리 모델을 골라 둘 수 있습니다.");
+    egpuText("egpuDetail", "eGPU(RX 9060 계열, 전용 USB 브리지)를 연결한 채로 주차·시동 ON 상태에서 콤마를 재부팅하면 선택한 모델을 내려받아 설치합니다. 켜져 있는 동안 꽂으면 다음 재부팅 때 시작합니다. 모델은 미리 골라 둘 수 있습니다.");
     egpuText("egpuError", " ");
     egpuShow("egpuDiagnostics", false);
     egpuShow("egpuRetry", false);
@@ -174,7 +174,7 @@ function bindEgpuPanel(container) {
     try {
       const result = await postJson("/api/egpu/model/library", { action: "select", model });
       if (egpuPanelState) egpuPanelState.library = result.library;
-      showAppToast("저장했습니다. 주차·시동 OFF 상태에서 콤마를 재부팅하면 적용됩니다.");
+      showAppToast("저장했습니다. 주차한 채 시동을 켜고 인터넷을 연결한 뒤 콤마를 재부팅하면 적용됩니다.");
     } catch (error) {
       showAppToast(error?.message || String(error), { tone: "error" });
     } finally {

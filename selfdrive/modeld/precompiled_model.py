@@ -18,6 +18,7 @@ from openpilot.selfdrive.modeld.big_model import active_manifest, model_cache_di
 from openpilot.selfdrive.modeld.precompiled_artifact import SERIALIZATIONS
 from openpilot.selfdrive.modeld.egpu_usb_wait import VERIFIED_USB_RUNTIMES
 from openpilot.selfdrive.modeld.egpu_events import error_summary, log_event
+from openpilot.selfdrive.modeld import egpu_firmware
 
 PROTOCOL = 1
 MAX_CATALOG = 64 * 1024
@@ -117,6 +118,9 @@ def installed(model=None, cache_dir: Path | None = None) -> Path | None:
       return None
     entry = 'examples/openpilot/compile_warp.py' if value['format'] == 'comma-generic-onnx' else 'model_runtime.py'
     if not (runtime / entry).is_file() or not (runtime / 'tinygrad' / '__init__.py').is_file():
+      return None
+    # The worker must be able to start the GPU offline after a reboot.
+    if not egpu_firmware.ready(root, runtime, value['gpu_arch']):
       return None
     return root / 'model.pkl'
   except (OSError, ValueError, KeyError, TypeError):
@@ -291,6 +295,8 @@ def ensure_precompiled(model=None, cache_dir: Path | None = None, progress=None)
         archive.extractall(staging, filter='data')
       os.replace(staging, runtime)
   # The worker uses this verified immutable directory, never the repository's tinygrad.
+  # Store the GPU firmware it pins while this delivery has network access.
+  egpu_firmware.prefetch(root, runtime, value['gpu_arch'])
   value['runtime_directory'] = runtime.name
   value['catalog_url'] = catalog_url
   marker = root / 'installed.json.tmp'
