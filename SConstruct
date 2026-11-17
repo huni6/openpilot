@@ -38,7 +38,21 @@ assert arch in [
 ]
 
 pkg_names = ['bzip2', 'capnproto', 'eigen', 'ffmpeg', 'libjpeg', 'libyuv', 'ncurses', 'zeromq', 'zstd']
+if arch == "larch64":
+  # AGNOS 19 no longer ships comma's legacy bzip2/libyuv Python wrappers.
+  # Neither dependency is used by an on-device target: bzip2 is replay-only,
+  # and the libyuv-backed FFmpeg encoder is excluded on larch64 (system/loggerd).
+  pkg_names = [name for name in pkg_names if name not in ('bzip2', 'libyuv')]
 pkgs = [importlib.import_module(name) for name in pkg_names]
+
+ffmpeg = pkgs[pkg_names.index('ffmpeg')]
+# AGNOS 19's FFmpeg package ships shared libraries in the venv; binaries linking
+# them need that directory at run time. Older AGNOS provided static archives.
+_ffmpeg_lib_names = os.listdir(ffmpeg.LIB_DIR) if os.path.isdir(ffmpeg.LIB_DIR) else []
+ffmpeg_shared = any(
+  name.startswith('libavcodec.so') or (name.startswith('libavcodec') and name.endswith('.dylib'))
+  for name in _ffmpeg_lib_names
+)
 
 
 # ***** enforce a whitelist of system libraries *****
@@ -123,7 +137,7 @@ env = Environment(
     f"#third_party/acados/{arch}/lib",
     [x.LIB_DIR for x in pkgs],
   ],
-  RPATH=[],
+  RPATH=[ffmpeg.LIB_DIR] if ffmpeg_shared else [],
   CYTHONCFILESUFFIX=".cpp",
   COMPILATIONDB_USE_ABSPATH=True,
   REDNOSE_ROOT="#",

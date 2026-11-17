@@ -18,14 +18,99 @@ function agnos_init {
   sudo chmod 660 /dev/adsprpc-smd /dev/ion /dev/kgsl-3d0
 
   # Check if AGNOS update is required
-  if [ $(< /VERSION) != "$AGNOS_VERSION" ]; then
+  if [ "$(< /VERSION)" != "$AGNOS_VERSION" ]; then
     AGNOS_PY="$DIR/system/hardware/tici/agnos.py"
     MANIFEST="$DIR/system/hardware/tici/agnos.json"
-    if $AGNOS_PY --verify $MANIFEST; then
+    # AGNOS 19.8-carrot ships separate images for comma 3 (tici) and comma 3X/4.
+    MODEL="$(tr -d '\000\r\n' 2>/dev/null < /sys/firmware/devicetree/base/model | tr '[:upper:]' '[:lower:]')"
+    MODEL="${MODEL#comma }"
+    if [ "$MODEL" = "c3" ] || [ "$MODEL" = "tici" ]; then
+      MANIFEST="$DIR/system/hardware/tici/agnos-tici.json"
+    fi
+    echo "AGNOS ${AGNOS_VERSION} update: model=${MODEL} manifest=${MANIFEST}"
+    if python3 $AGNOS_PY --verify $MANIFEST; then
       sudo reboot
     fi
     $DIR/system/hardware/tici/updater $AGNOS_PY $MANIFEST
   fi
+}
+
+# AGNOS 19 (ported from carrot-wip) no longer ships several Python packages this
+# branch imports, nor the legacy libjpeg/Eigen wrappers SConstruct needs. Install
+# them offline from third_party/wheels into pydeps; never into the system venv.
+function install_runtime_python_package {
+  if python3 -m pip --version > /dev/null 2>&1; then
+    python3 -m pip install --disable-pip-version-check --no-input --timeout 15 --retries 2 \
+      --target "$PYDEPS" --upgrade "$@"
+  elif command -v uv > /dev/null 2>&1; then
+    UV_HTTP_TIMEOUT=15 UV_HTTP_RETRIES=2 uv pip install --python "$(command -v python3)" --no-python-downloads \
+      --target "$PYDEPS" --upgrade "$@"
+  else
+    echo "No Python package installer is available."
+    return 1
+  fi
+}
+
+function ensure_python_package {
+  local import_name="$1"
+  local package_name="$2"
+  local required="${3:-0}"
+  local install_dependencies="${4:-0}"
+  local wheel_dir="$DIR/third_party/wheels"
+
+  if python3 -c "import ${import_name}" > /dev/null 2>&1; then
+    return 0
+  fi
+
+  echo "${package_name} installing from local wheel."
+  if [ "$install_dependencies" = "1" ]; then
+    install_runtime_python_package --no-index --find-links "$wheel_dir" "$package_name"
+  else
+    install_runtime_python_package --no-index --no-deps --find-links "$wheel_dir" "$package_name"
+  fi
+  if [ "$?" = "0" ] && python3 -c "import ${import_name}" > /dev/null 2>&1; then
+    echo "${package_name} installed."
+    return 0
+  fi
+
+  python3 -c "import ${import_name}" >&2
+  if [ "$required" = "1" ]; then
+    echo "Required Python package ${package_name} is unavailable; not starting openpilot."
+    return 1
+  fi
+  echo "Optional Python package ${package_name} is unavailable; continuing without it."
+  return 0
+}
+
+function bootstrap_runtime_dependencies {
+  # Only what this branch imports at runtime/build time and AGNOS 19 lacks.
+  if ! ensure_python_package serial pyserial 1 || \
+     ! ensure_python_package msgpack msgpack 1 || \
+     ! ensure_python_package aiohttp aiohttp 1 1 || \
+     ! ensure_python_package "aiortc; import av; import pylibsrtp" "aiortc==1.14.0" 1 1 || \
+     ! ensure_python_package psutil psutil 1 || \
+     ! ensure_python_package crcmod crcmod-plus 1 || \
+     ! ensure_python_package jsonrpc json-rpc 1 || \
+     ! ensure_python_package qrcode qrcode 1; then
+    return 1
+  fi
+
+  ensure_python_package brotli brotli 0
+  ensure_python_package usb pyusb 0
+  ensure_python_package shapely shapely 0
+
+  # SConstruct imports these native dependency wrappers; AGNOS 19 dropped them.
+  if { [ -f /TICI ] || [ -f /AGNOS ]; } && \
+     { ! ensure_python_package eigen eigen 1 || ! ensure_python_package libjpeg libjpeg 1; }; then
+    return 1
+  fi
+}
+
+function show_startup_failure {
+  local message="$1"
+  echo "$message"
+  python3 "$DIR/system/ui/text.py" "$message" || true
+  while true; do sleep 1; done
 }
 
 function start_carrot_recovery {
@@ -170,6 +255,13 @@ function launch {
   # hardware specific init
   if [ -f /AGNOS ]; then
     agnos_init
+  fi
+
+  # AGNOS must be current before installing its matching offline wheels, and
+  # SCons imports native dependency modules, so do this before any build.
+  # The bundled wheels target AGNOS/aarch64; PC environments manage their own.
+  if { [ -f /AGNOS ] || [ -f /TICI ]; } && ! bootstrap_runtime_dependencies; then
+    show_startup_failure "Runtime dependency installation failed. Check /data/openpilot/third_party/wheels."
   fi
 
   FORCE_REBUILD=0
