@@ -241,12 +241,29 @@ def retry_output_rejection(root: Path, pickle_sha256: str) -> bool:
     return False
 
 
+def restore_firmware_record(root: Path, model, cache_dir: Path | None = None) -> Path | None:
+  """Offline: re-verify stored firmware for an otherwise complete install (e.g. a missing hashes.json).
+
+  Only the stored blobs and the immutable runtime are used; a blob that is
+  missing or damaged still needs the network and falls through to delivery.
+  """
+  try:
+    value = json.loads((root / 'installed.json').read_text())
+    runtime = root / value['runtime_directory']
+    if not runtime.is_dir() or egpu_firmware.ready(root, runtime, value['gpu_arch']):
+      return None
+    egpu_firmware.prefetch(root, runtime, value['gpu_arch'], offline=True)
+  except (OSError, ValueError, KeyError, TypeError, ConnectionError):
+    return None
+  return installed(model, cache_dir)
+
+
 def ensure_precompiled(model=None, cache_dir: Path | None = None, progress=None) -> Path | None:
   model = model or active_manifest()
   if model is None:
     return None
   root = (cache_dir or model_cache_dir()) / 'precompiled' / model.sha256
-  existing = installed(model, cache_dir)
+  existing = installed(model, cache_dir) or restore_firmware_record(root, model, cache_dir)
   if existing:
     value = json.loads((root / 'installed.json').read_text())
     if sha256(existing) == value['pickle']['sha256'] and sha256(root / 'runtime.tar.gz') == value['runtime']['sha256']:

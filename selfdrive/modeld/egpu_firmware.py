@@ -34,7 +34,7 @@ OS_FIRMWARE_ROOT_ENV = 'CARROT_OS_FIRMWARE_ROOT'
 
 _PREFETCH = r'''
 import hashlib, json, os, pathlib, sys, tempfile
-runtime, out, names = sys.argv[1], pathlib.Path(sys.argv[2]), sys.argv[3:]
+runtime, out, offline, names = sys.argv[1], pathlib.Path(sys.argv[2]), sys.argv[3] == '1', sys.argv[4:]
 sys.path.insert(0, runtime)
 from tinygrad import helpers
 from tinygrad.runtime.autogen.am import fw
@@ -79,6 +79,8 @@ for name in names:
   if not (target.is_file() and sha(target.read_bytes()) == want):
     blob = os_blob(name)
     if blob is None or sha(blob) != want:
+      if offline:
+        raise ConnectionError(f'{name} needs a download')
       pathlib.Path.is_file = skip_os_firmware
       try:
         blob = helpers.fetch_fw('amdgpu', name, want)
@@ -120,7 +122,8 @@ def ready(root: Path, runtime: Path, gpu_arch: str) -> bool:
     return False
 
 
-def prefetch(root: Path, runtime: Path, gpu_arch: str, timeout: float = 300, names: tuple[str, ...] | None = None) -> None:
+def prefetch(root: Path, runtime: Path, gpu_arch: str, timeout: float = 300, names: tuple[str, ...] | None = None,
+             offline: bool = False) -> None:
   """Store the runtime's pinned firmware under root; raises ConnectionError when it cannot."""
   if not applies(runtime):
     return
@@ -128,7 +131,7 @@ def prefetch(root: Path, runtime: Path, gpu_arch: str, timeout: float = 300, nam
   env = dict(os.environ)
   env.pop('XDG_CACHE_HOME', None)
   try:
-    subprocess.run([sys.executable, '-I', '-c', _PREFETCH, str(runtime), str(root / FIRMWARE_DIR), *names],
+    subprocess.run([sys.executable, '-I', '-c', _PREFETCH, str(runtime), str(root / FIRMWARE_DIR), '1' if offline else '0', *names],
                    env=env, check=True, timeout=timeout, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
   except subprocess.CalledProcessError as exc:
     detail = (exc.stdout or b'').decode('utf-8', 'replace').strip().splitlines()

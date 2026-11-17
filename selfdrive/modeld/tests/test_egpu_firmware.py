@@ -258,3 +258,33 @@ def test_firmware_failures_never_block_the_artifact_and_old_blocks_retry(tmp_pat
                                    'ValueError: quoted GPU firmware unavailable'])
 def test_unrelated_errors_are_not_firmware_failures(error):
   assert not F.failure(error)
+
+
+def test_complete_install_without_firmware_record_is_restored_offline(tmp_path, blobs, monkeypatch):
+  from openpilot.selfdrive.modeld import precompiled_model as P
+  model_sha, runtime_sha = 'a' * 64, None
+  root = tmp_path / 'precompiled' / model_sha
+  root.mkdir(parents=True)
+  (root / 'model.pkl').write_bytes(b'x' * 10)
+  (root / 'runtime.tar.gz').write_bytes(b'runtime archive')
+  runtime_sha = hashlib.sha256(b'runtime archive').hexdigest()
+  runtime = fake_runtime(root / ('runtime-' + runtime_sha[:16]), blobs, fail=True)  # any download would fail
+  (runtime / 'examples/openpilot').mkdir(parents=True)
+  (runtime / 'examples/openpilot/compile_warp.py').write_text('')
+  value = {'runtime_directory': runtime.name, 'catalog_url': 'https://example.com/precompiled.json', 'format': 'comma-generic-onnx',
+           'gpu_arch': 'gfx1200', 'pickle': {'size': 10, 'sha256': hashlib.sha256(b'x' * 10).hexdigest()},
+           'runtime': {'sha256': runtime_sha}}
+  (root / 'installed.json').write_text(json.dumps(value))
+  (root / F.FIRMWARE_DIR).mkdir()
+  for name, blob in blobs.items():  # a56cdeac-style store: verified blobs, no hashes.json
+    (root / F.FIRMWARE_DIR / name).write_bytes(blob)
+  monkeypatch.setattr(P, 'validate_catalog', lambda value, sha, url: value)
+  monkeypatch.setattr(P, 'urlopen', lambda *a, **k: pytest.fail('network used'))
+  model = SimpleNamespace(sha256=model_sha, url='https://example.com/model.pkl')
+  assert P.installed(model, tmp_path) is None
+  assert P.ensure_precompiled(model, tmp_path) == root / 'model.pkl'
+  assert (root / F.FIRMWARE_DIR / F.HASHES).is_file()
+  # A missing blob still needs the network: offline restore declines instead of downloading.
+  (root / F.FIRMWARE_DIR / F.HASHES).unlink()
+  (root / F.FIRMWARE_DIR / NAMES[0]).unlink()
+  assert P.restore_firmware_record(root, model, tmp_path) is None
