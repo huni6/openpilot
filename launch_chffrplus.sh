@@ -81,6 +81,46 @@ function invalidate_native_build_if_needed {
   fi
 }
 
+function prepare_big_model_if_needed {
+  # Carrot eGPU (ported from carrot-wip): with an attached eGPU, install and
+  # smoke-test this boot's selected precompiled model before starting modeld.
+  # Any failure keeps the internal model for this boot; driving is never blocked
+  # on the network. The background updater below keeps retrying the download.
+  unset CARROT_BIG_MODEL_STARTUP_FAILED
+  if ! python3 -c 'from openpilot.selfdrive.modeld.helpers import usbgpu_present; raise SystemExit(0 if usbgpu_present() else 1)' 2>/dev/null; then
+    return
+  fi
+
+  if ! flock /tmp/big_model_update.lock python3 -m openpilot.selfdrive.modeld.big_model --prepare-for-startup; then
+    echo "Selected eGPU model preparation failed; using the internal model this boot."
+    export CARROT_BIG_MODEL_STARTUP_FAILED=1
+    return
+  fi
+  if ! python3 -m openpilot.selfdrive.modeld.egpu_prepare; then
+    echo "Selected eGPU model is not ready; using the internal model this boot."
+  fi
+}
+
+function start_big_model_update {
+  local log_path="/tmp/big_model_update.log"
+  local lock_path="/tmp/big_model_update.lock"
+
+  if command -v pgrep >/dev/null 2>&1 && pgrep -f '[o]penpilot.selfdrive.modeld.big_model --ensure-if-egpu' >/dev/null 2>&1; then
+    return
+  fi
+
+  echo "Checking optional eGPU model in background (log: ${log_path})."
+  (
+    exec 9>"$lock_path"
+    flock -n 9 || exit 0
+    if command -v ionice >/dev/null 2>&1; then
+      PYTHONUNBUFFERED=1 ionice -c 3 nice -n 10 python3 -m openpilot.selfdrive.modeld.big_model --ensure-if-egpu --network-wait-seconds 60 --retry-network
+    else
+      PYTHONUNBUFFERED=1 nice -n 10 python3 -m openpilot.selfdrive.modeld.big_model --ensure-if-egpu --network-wait-seconds 60 --retry-network
+    fi
+  ) >> "$log_path" 2>&1 &
+}
+
 function launch {
   # Remove orphaned git lock if it exists on boot
   [ -f "$DIR/.git/index.lock" ] && rm -f $DIR/.git/index.lock
@@ -135,6 +175,11 @@ function launch {
   FORCE_REBUILD=0
   invalidate_modeld_build_if_needed
   invalidate_native_build_if_needed
+  # Accept the pending external (eGPU) model choice once per real boot, before modeld.
+  if ! flock /tmp/big_model_selection.lock python3 -m openpilot.common.big_model_catalog; then
+    echo "External model selection unavailable; keeping the catalog default."
+  fi
+  prepare_big_model_if_needed
 
   rm selfdrive/pandad/*.so
   # write tmux scrollback to a file
@@ -216,6 +261,7 @@ function launch {
       echo -n "$MODEL_BUILD_STAMP_VALUE" > "$DIR/selfdrive/modeld/models/.build_stamp"
     fi
   fi
+  start_big_model_update
   ./manager.py
 
   # if broken, keep on screen error

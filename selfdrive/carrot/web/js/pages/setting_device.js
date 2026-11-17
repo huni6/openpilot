@@ -325,7 +325,7 @@ async function refreshDeviceSshPanel() {
 }
 
 async function getDeviceGroupValues(groupId) {
-  if (groupId === "RemoteSupport" || groupId === "Jetson") return {};
+  if (groupId === "RemoteSupport" || groupId === "Jetson" || groupId === "Egpu") return {};
   if (groupId === "Network") {
     await loadDeviceNetwork(false);
     return deviceParamValues;
@@ -393,6 +393,7 @@ function renderDeviceGroupItems(groupId, values) {
   if (groupId === "Network") return renderNetworkPanel(deviceNetworkInfo || {});
   if (groupId === "RemoteSupport") return renderRemoteSupportPanel();
   if (groupId === "Jetson") return renderJetsonPanel();
+  if (groupId === "Egpu") return renderEgpuPanel();
   if (groupId === "Toggles") return renderDeviceToggleItems(data);
   if (groupId === "Developer") return renderDeviceDeveloperItems(data);
   if (groupId === "Software") {

@@ -3,6 +3,7 @@ from aiohttp import web
 from . import (
   cars,
   dashcam,
+  egpu_model,
   params,
   phone_media,
   remote_support,
@@ -36,6 +37,7 @@ def register_all(app: web.Application) -> None:
   cars.register(app)
   phone_media.register(app)
   remote_support.register(app)
+  egpu_model.register(app)
   system.register(app)
   terminal.register(app)
   dashcam.register(app)

@@ -10,6 +10,7 @@ const DEVICE_GROUPS = [
   { id: "Software", labelKey: "device_group_software", defaultLabel: "Software" },
   { id: "RemoteSupport", labelKey: "device_group_remote_support", defaultLabel: "원격지원" },
   { id: "Jetson", labelKey: "device_group_jetson", defaultLabel: "Jetson" },
+  { id: "Egpu", labelKey: "device_group_egpu", defaultLabel: "eGPU 모델" },
   { id: "Developer", labelKey: "device_group_developer", defaultLabel: "Developer" },
 ];
 

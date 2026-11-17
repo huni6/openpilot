@@ -3,6 +3,7 @@
 function bindDeviceTabEvents(container) {
   if (container.querySelector("#remoteSupportPanel")) bindRemoteSupportPanel(container);
   if (container.querySelector("#jetsonPanel")) bindJetsonPanel(container);
+  if (container.querySelector("#egpuPanel")) bindEgpuPanel(container);
   bindDeviceDisabledControls(container);
   bindDeviceToggleRows(container);
   bindDevicePersonality(container);

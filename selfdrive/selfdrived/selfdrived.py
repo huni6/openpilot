@@ -123,6 +123,11 @@ class SelfdriveD:
     self.last_functional_fan_frame = 0
     self.events_prev = []
     self.logged_comm_issue = None
+    # Carrot eGPU: the first external-model output can take several seconds.
+    self.big_model_loading = False
+    self.big_model_active = False
+    self.big_model_ready_t = 0.0
+    self.model_startup_complete = False
     self.not_running_prev = None
     self.experimental_mode = False
     self.personality = self.read_personality_param()
@@ -158,6 +163,18 @@ class SelfdriveD:
       set_offroad_alert("Offroad_CarUnrecognized", True)
     elif self.CP.passive:
       self.events.add(EventName.dashcamMode, static=True)
+
+  def _big_model_settling(self) -> bool:
+    """Allow modeld to settle after eGPU startup or runtime fallback."""
+    loading = self.params.get_bool("UsbGpuLoading")
+    active = self.params.get_bool("UsbGpuActive")
+
+    if (self.big_model_loading and not loading) or (self.big_model_active and not active):
+      self.big_model_ready_t = time.monotonic()
+
+    self.big_model_loading = loading
+    self.big_model_active = active
+    return loading or time.monotonic() < self.big_model_ready_t + 5.0
 
   def update_events(self, CS):
     """Compute onroadEvents from carState"""
@@ -360,11 +377,18 @@ class SelfdriveD:
           self.events.add(EventName.cameraFrameRate)
     if not REPLAY and self.rk.lagging:
       self.events.add(EventName.selfdrivedLagging)
+    # Before the first complete start, a loading eGPU model only blocks engagement
+    # (System Initializing) instead of raising radar/communication faults.
+    if self.enabled or self.sm.all_checks():
+      self.model_startup_complete = True
+    model_starting = self._big_model_settling() and not self.model_startup_complete
     if not self.sm.valid['radarState']:
       if self.sm['radarState'].radarErrors.canError:
         self.events.add(EventName.canError)
       elif self.sm['radarState'].radarErrors.radarUnavailableTemporary:
         self.events.add(EventName.radarTempUnavailable)
+      elif model_starting:
+        self.events.add(EventName.selfdriveInitializing)
       else:
         self.events.add(EventName.radarFault)
     if not self.sm.valid['pandaStates']:
@@ -377,7 +401,10 @@ class SelfdriveD:
     # generic catch-all. ideally, a more specific event should be added above instead
     has_disable_events = self.events.contains(ET.NO_ENTRY) and (self.events.contains(ET.SOFT_DISABLE) or self.events.contains(ET.IMMEDIATE_DISABLE))
     no_system_errors = (not has_disable_events) or (len(self.events) == num_events)
-    if not self.sm.all_checks() and no_system_errors:
+    if not self.sm.all_checks() and no_system_errors and model_starting:
+      if EventName.selfdriveInitializing not in self.events.names:
+        self.events.add(EventName.selfdriveInitializing)
+    elif not self.sm.all_checks() and no_system_errors:
       if not self.sm.all_alive():
         self.events.add(EventName.commIssue)
       elif not self.sm.all_freq_ok():
