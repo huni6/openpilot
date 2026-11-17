@@ -76,7 +76,7 @@ def main():
       os.environ['OPENPILOT_HACKS'] = '1'
   # Before any AMD driver import: use the verified firmware stored with this artifact.
   from openpilot.selfdrive.modeld.egpu_firmware import install_fetch_hook
-  install_fetch_hook(pkl.parent)
+  install_fetch_hook(pkl.parent, runtime)
   if not generic:
     import model_runtime
   from tinygrad import Device, Tensor

@@ -206,7 +206,9 @@ def retry_usb_rejection(root: Path, pickle_sha256: str) -> bool:
             isinstance(failure.get('error'), str)):
       return False
     if (gpu_transport_failure(failure['error']) or gpu_bootloader_timeout(failure['error'], failure['phase']) or
-        gpu_mapping_timeout(failure['error'], failure['phase'])):
+        gpu_mapping_timeout(failure['error'], failure['phase']) or
+        # Earlier builds let the runtime decode AGNOS 18.4 firmware itself and blocked the model.
+        egpu_firmware.failure(failure['error'])):
       return True
     manifest = json.loads((root / 'installed.json').read_text())
     return (isinstance(manifest, dict) and isinstance(manifest.get('pickle'), dict) and
@@ -323,6 +325,7 @@ def record_failure(path: Path, error: BaseException | str, phase: str) -> bool:
                gpu_transport_failure(detail) or
                gpu_usb_link_failure(detail, value) or
                gpu_bootloader_timeout(detail, phase) or gpu_mapping_timeout(detail, phase) or
+               egpu_firmware.failure(detail) or
                'precompiled eGPU worker timed out' in detail or 'precompiled eGPU worker exited' in detail)
   from openpilot.selfdrive.modeld.egpu_worker_progress import boot_identity
   classification = 'transient_device' if transient else 'device_restart_required' if gpu_restart_failure(detail, value) else 'artifact_blocked'

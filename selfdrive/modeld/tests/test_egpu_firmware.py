@@ -14,6 +14,10 @@ from openpilot.selfdrive.modeld import egpu_firmware as F
 NAMES = F.AMD_FIRMWARE['gfx1200']
 
 
+def stored(root: Path) -> dict[str, bytes]:
+  return {p.name: p.read_bytes() for p in (root / F.FIRMWARE_DIR).iterdir() if p.name != F.HASHES}
+
+
 def fake_runtime(path: Path, served: dict[str, bytes], fail: bool = False) -> Path:
   """A minimal runtime layout: fetch_fw/hashes as the pinned tinygrad provides them."""
   (path / 'tinygrad/runtime/autogen/am').mkdir(parents=True)
@@ -57,7 +61,7 @@ def test_prefetch_stores_verified_firmware_once(tmp_path, blobs, monkeypatch):
   assert not F.ready(tmp_path, runtime, 'gfx1200')
   F.prefetch(tmp_path, runtime, 'gfx1200')
   assert F.ready(tmp_path, runtime, 'gfx1200')
-  assert {p.name: p.read_bytes() for p in (tmp_path / F.FIRMWARE_DIR).iterdir()} == blobs
+  assert stored(tmp_path) == blobs
   assert sorted(log.read_text().split()) == sorted(NAMES)
   F.prefetch(tmp_path, runtime, 'gfx1200')  # verified copies are reused
   assert len(log.read_text().split()) == len(NAMES)
@@ -144,7 +148,7 @@ def test_agnos_18_4_sizeless_os_firmware_is_used_and_stale_blobs_are_downloaded(
   monkeypatch.setenv('FW_LOG', str(log))
   monkeypatch.setenv(F.OS_FIRMWARE_ROOT_ENV, str(os_root))
   F.prefetch(tmp_path, runtime, 'gfx1200')
-  assert {p.name: p.read_bytes() for p in (tmp_path / F.FIRMWARE_DIR).iterdir()} == blobs
+  assert stored(tmp_path) == blobs
   assert set(log.read_text().split()) == stale
 
 
@@ -172,3 +176,85 @@ print("ok")
   result = subprocess.run([sys.executable, '-c', code], capture_output=True, text=True,
                           env=dict(os.environ, PYTHONPATH=str(root), **{F.OS_FIRMWARE_ROOT_ENV: str(os_root)}))
   assert result.stdout.strip() == 'ok', result.stderr
+
+
+def test_corrupt_stored_firmware_is_not_ready_and_is_repaired(tmp_path, blobs):
+  runtime = fake_runtime(tmp_path / 'runtime', blobs)
+  F.prefetch(tmp_path, runtime, 'gfx1200')
+  (tmp_path / F.FIRMWARE_DIR / 'smu_14_0_2.bin').write_bytes(b'damaged')
+  assert not F.ready(tmp_path, runtime, 'gfx1200')
+  F.prefetch(tmp_path, runtime, 'gfx1200')
+  assert F.ready(tmp_path, runtime, 'gfx1200') and stored(tmp_path) == blobs
+  (tmp_path / F.FIRMWARE_DIR / F.HASHES).unlink()
+  assert not F.ready(tmp_path, runtime, 'gfx1200')
+
+
+def hook_result(tmp_path, runtime, os_root, code_tail):
+  code = f'''
+import sys; sys.path.insert(0, {str(runtime)!r})
+from tinygrad import helpers
+def original(path, name, sha256): raise RuntimeError("runtime fetch_fw must not read amdgpu blobs")
+helpers.fetch_fw = original
+from openpilot.selfdrive.modeld.egpu_firmware import install_fetch_hook, AMD_FIRMWARE
+from pathlib import Path
+install_fetch_hook(Path({str(tmp_path)!r}), Path({str(runtime)!r}))
+from tinygrad.runtime.support.am import amdev
+from tinygrad.runtime.autogen.am import fw
+{code_tail}
+'''
+  root = Path(__file__).resolve().parents[3]
+  return subprocess.run([sys.executable, '-c', code], capture_output=True, text=True,
+                        env=dict(os.environ, PYTHONPATH=str(root), **{F.OS_FIRMWARE_ROOT_ENV: str(os_root)}))
+
+
+def test_worker_repairs_damaged_store_instead_of_decoding_bad_os_firmware(tmp_path, blobs):
+  runtime = fake_runtime(tmp_path / 'runtime', blobs)
+  F.prefetch(tmp_path, runtime, 'gfx1200')
+  (tmp_path / F.FIRMWARE_DIR / 'smu_14_0_2.bin').write_bytes(b'damaged')
+  os_root = tmp_path / 'os-firmware'
+  (os_root / 'amdgpu').mkdir(parents=True)
+  for name in NAMES:  # AGNOS 18.4: sizeless frames, and a stale smu blob
+    (os_root / 'amdgpu' / f'{name}.zst').write_bytes(sizeless_zst(b'old ' + blobs[name] if name == 'smu_14_0_2.bin' else blobs[name]))
+  result = hook_result(tmp_path, runtime, os_root, '''
+for name in AMD_FIRMWARE["gfx1200"]:
+  assert amdev.fetch_fw("amdgpu", name, fw.hashes[name]) == helpers.SERVED[name].encode(), name
+print("ok")
+''')
+  assert result.stdout.strip() == 'ok', result.stderr
+  assert F.ready(tmp_path, runtime, 'gfx1200') and stored(tmp_path) == blobs
+
+
+def test_worker_reports_unavailable_firmware_without_network(tmp_path, blobs):
+  runtime = fake_runtime(tmp_path / 'runtime', blobs, fail=True)
+  result = hook_result(tmp_path, runtime, tmp_path / 'no-os-firmware', '''
+try:
+  amdev.fetch_fw("amdgpu", "smu_14_0_2.bin", fw.hashes["smu_14_0_2.bin"])
+except RuntimeError as exc:
+  print(exc)
+''')
+  assert result.stdout.strip() == 'GPU firmware unavailable: smu_14_0_2.bin', result.stderr
+  assert F.failure('RuntimeError: ' + result.stdout.strip())
+
+
+@pytest.mark.parametrize('error', ['zstd.ZstdError: could not determine content size in frame header',
+                                   'Traceback (most recent call last):\n  File "x"\nzstandard.backend_c.ZstdError: could not determine content size in frame header',
+                                   'RuntimeError: GPU firmware unavailable: smu_14_0_2.bin'])
+def test_firmware_failures_never_block_the_artifact_and_old_blocks_retry(tmp_path, monkeypatch, error):
+  from openpilot.selfdrive.modeld import egpu_worker_progress, precompiled_model as pm
+  value = {'pickle': {'sha256': 'a' * 64}, 'runtime': {'sha256': 'b' * 64}}
+  (tmp_path / 'installed.json').write_text(json.dumps(value))
+  monkeypatch.setattr(egpu_worker_progress, 'boot_identity', lambda: 'first')
+  assert not pm.record_failure(tmp_path / 'model.pkl', error, 'load')
+  assert not (tmp_path / 'rejected').exists()
+  # A block written by the earlier port (cb78f7b0) is retried once on the next boot.
+  failure = json.loads((tmp_path / 'last_failure.json').read_text()) | {'rejected': True, 'classification': 'artifact_blocked'}
+  (tmp_path / 'last_failure.json').write_text(json.dumps(failure))
+  assert not pm.retry_usb_rejection(tmp_path, 'a' * 64)
+  monkeypatch.setattr(egpu_worker_progress, 'boot_identity', lambda: 'second')
+  assert pm.retry_usb_rejection(tmp_path, 'a' * 64)
+
+
+@pytest.mark.parametrize('error', ['ValueError: precompiled PKL checksum mismatch', 'ZstdError: other message',
+                                   'ValueError: quoted GPU firmware unavailable'])
+def test_unrelated_errors_are_not_firmware_failures(error):
+  assert not F.failure(error)
