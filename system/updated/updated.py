@@ -221,6 +221,15 @@ def handle_agnos_update() -> None:
   set_offroad_alert("Offroad_NeosUpdate", True)
 
   manifest_path = os.path.join(OVERLAY_MERGED, "system/hardware/tici/agnos.json")
+  # AGNOS 19.8-carrot ships separate boot images for comma 3 (tici); match launch_chffrplus.sh.
+  try:
+    with open("/sys/firmware/devicetree/base/model") as f:
+      model = f.read().replace("\x00", "").strip().lower().removeprefix("comma ")
+    if model in ("c3", "tici"):
+      manifest_path = os.path.join(OVERLAY_MERGED, "system/hardware/tici/agnos-tici.json")
+    cloudlog.info(f"AGNOS manifest for model {model}: {manifest_path}")
+  except OSError:
+    cloudlog.exception("device model read failed; using the comma 3X/4 AGNOS manifest")
   target_slot_number = get_target_slot_number()
   flash_agnos_update(manifest_path, target_slot_number, cloudlog)
   set_offroad_alert("Offroad_NeosUpdate", False)
