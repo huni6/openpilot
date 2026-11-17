@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 import pyray as rl
 
 from openpilot.system.ui.lib.application import gui_app, FontWeight
@@ -12,6 +14,8 @@ COLORS = {
   'ready': rl.Color(255, 255, 255, 230),
   'loading': rl.Color(255, 220, 0, 230),
   'error': rl.Color(255, 70, 70, 255),
+  # eGPU attached but its selected model is not installed yet.
+  'not_compiled': rl.Color(255, 165, 0, 230),
 }
 
 
@@ -32,7 +36,9 @@ def draw_jetlink_badge(status: tuple[str, str] | None, bounds: rl.Rectangle, fon
   size = measure_text_cached(font, text, font_size)
   if bounds.width < measure_text_cached(font, '...', font_size).x + 2 * pad_x or bounds.height < size.y:
     return None
-  width = bounds.width if stacked else min(bounds.width, size.x + 2 * pad_x)
+  # Round up with a pixel of slack: float32 rectangles otherwise make gui_label elide
+  # short labels ("eGPU" -> "eG...") that fit exactly.
+  width = bounds.width if stacked else min(bounds.width, math.ceil(size.x) + 2 * pad_x + 1)
   rect = rl.Rectangle(bounds.x + bounds.width - width, bounds.y, width, bounds.height)
   roundness = min(1., 16. / min(rect.width, rect.height))
   rl.draw_rectangle_rounded(rect, roundness, 8, rl.Color(0, 0, 0, 170))

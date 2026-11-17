@@ -92,6 +92,16 @@ class UIState:
     self.jetlink_detail: str = ''
     self.jetlink_detail_since: float = 0.
     self._jetlink_update_time: float = float('-inf')
+    # eGPU (carrot-wip USB big model) state for the on-road badge.
+    self.usbgpu_present: bool = False
+    self.usbgpu_compiled: bool = False
+    self.usbgpu_loading: bool = False
+    self.usbgpu_active: bool = False
+    self.usbgpu_startup_failed: bool = False
+    self.usbgpu_delivery_badge: tuple[str, str] | None = None
+    self.usbgpu_recovery_badge: tuple[str, str] | None = None
+    self.egpu_badge: tuple[str, str] | None = None
+    self._egpu_update_time: float = float('-inf')
 
     # Callbacks
     self._offroad_transition_callbacks: list[Callable[[], None]] = []
@@ -125,6 +135,7 @@ class UIState:
     self._update_state()
     self._update_status()
     self._update_jetlink_status()
+    self._update_egpu_status()
     if time.monotonic() - self._param_update_time > 5.0:
       self.update_params()
     device.update()
@@ -142,6 +153,28 @@ class UIState:
     if (badge, detail) != (self.jetlink_badge, self.jetlink_detail):
       self.jetlink_detail_since = now
     self.jetlink_badge, self.jetlink_detail = badge, detail
+
+  def _update_egpu_status(self) -> None:
+    now = time.monotonic()
+    if now - self._egpu_update_time < 1.0:
+      return
+    self._egpu_update_time = now
+    try:
+      from openpilot.common.egpu_recovery_status import read_status, recovery_badge
+      from openpilot.selfdrive.modeld.big_model import model_cache_dir
+      from openpilot.selfdrive.modeld.big_model_status import delivery_badge, read_big_model_status
+      from openpilot.selfdrive.ui.onroad.egpu_badge import egpu_badge
+      self.usbgpu_present = self.params.get_bool("UsbGpuPresent")
+      self.usbgpu_loading = self.params.get_bool("UsbGpuLoading")
+      self.usbgpu_active = self.params.get_bool("UsbGpuActive")
+      self.usbgpu_startup_failed = self.params.get_bool("UsbGpuStartupFailed")
+      self.usbgpu_delivery_badge = delivery_badge(read_big_model_status(model_cache_dir()))
+      self.usbgpu_recovery_badge = recovery_badge(read_status())
+      self.egpu_badge = egpu_badge(self.usbgpu_present, self.usbgpu_compiled, self.usbgpu_loading, self.usbgpu_active,
+                                   self.usbgpu_startup_failed, self.usbgpu_delivery_badge, self.usbgpu_recovery_badge)
+    except Exception:
+      # Optional accelerator diagnostics must not interrupt the driving UI.
+      self.egpu_badge = None
 
   def _update_state(self) -> None:
     # Handle panda states updates
@@ -219,6 +252,12 @@ class UIState:
     self.show_radar_info = self.params.get_int("ShowRadarInfo")
     self.show_brightness_ratio: float = self.params.get_int("ShowCustomBrightness") / 100.0
     self.show_model_view = self.params.get_int("ShowModelView")
+    try:
+      # Verifies the installed package and its stored firmware; slower, so not every second.
+      from openpilot.selfdrive.modeld.helpers import active_usbgpu_compiled_path
+      self.usbgpu_compiled = active_usbgpu_compiled_path() is not None
+    except Exception:
+      self.usbgpu_compiled = False
 
     self._param_update_time = time.monotonic()
 

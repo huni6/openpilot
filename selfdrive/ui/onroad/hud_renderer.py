@@ -223,8 +223,13 @@ class HudRenderer(Widget):
     self._draw_date_time(rect)
     self._draw_tpms_top_right(rect)
     badge_right = button_x - 24
+    # eGPU status sits next to the experimental-mode button (as in carrot-wip);
+    # the Jetson badge, when present, moves to its left.
+    egpu_rect = draw_jetlink_badge(ui_state.egpu_badge, rl.Rectangle(rect.x + 350, rect.y + 24,
+                                   badge_right - rect.x - 350, 66), 38) if ui_state.egpu_badge else None
+    jetlink_right = egpu_rect.x - 16 if egpu_rect is not None else badge_right
     draw_jetlink_badge(ui_state.jetlink_badge, rl.Rectangle(rect.x + 350, rect.y + 24,
-                      badge_right - rect.x - 350, 66), 38)
+                      jetlink_right - rect.x - 350, 66), 38)
     detail_width = min(780, badge_right - rect.x - 350)
     draw_jetlink_detail(ui_state.jetlink_detail, rl.Rectangle(badge_right - detail_width, rect.y + 100, detail_width, 150),
                        26, time.monotonic() - ui_state.jetlink_detail_since)

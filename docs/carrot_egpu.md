@@ -37,6 +37,23 @@ MD v3는 원본에서 은퇴했다. 목록에는 안 나오고, 예전에 받아
 - 주행 중 eGPU가 끊기거나 오류가 나면 내장 모델로 넘어간다(새 카메라 프레임부터). 정상 로드 뒤의 USB·시간 초과 오류에 한해 10/30/60초 간격으로 최대 세 번 다시 붙이고, 정차하거나 핸들을 잡았을 때 eGPU로 돌아간다. 시작할 때부터 eGPU 로딩에 실패한 부팅은 재연결하지 않는다.
 - 파일은 `/data/media/0/carrot/models`에 저장한다.
 
+## 콤마 화면 표시 (온로드)
+
+원본 당근처럼 eGPU 상태를 배지로 띄운다. comma 3·3X는 실험 모드 버튼 왼쪽(젯슨 배지는 그 왼쪽), comma 4는 오른쪽 위다.
+eGPU 연결 이력·설치 상태·실행 상태가 없으면 배지를 그리지 않는다.
+
+| 배지 | 색 | 뜻 |
+|---|---|---|
+| eGPU | 초록 | eGPU가 주행 모델을 돌리는 중 |
+| eGPU | 노랑 | eGPU 모델 로딩 중 |
+| eGPU | 흰색 | 설치돼 있고 대기 |
+| eGPU | 주황 | eGPU는 보이지만 선택 모델이 아직 설치 안 됨 |
+| eGPU ERROR | 빨강 | 시작·실행 실패, 내장 모델로 주행 |
+| eGPU SETUP / NET / CLOCK | 노랑 | 내려받기·설치 중 / 네트워크 대기 / 시계 대기 |
+| eGPU NEXT | 흰색 | 설치 끝, 다음 시동부터 사용 |
+| eGPU FILE | 빨강 | 이전 실패로 모델 차단 |
+| eGPU RETRY / READY | 노랑 / 흰색 | 주행 중 재연결 시도 / 재연결 준비됨 |
+
 ## AGNOS 와 GPU 펌웨어
 
 이 브랜치는 이제 원본과 같은 AGNOS 19.8-carrot-bt1을 쓴다(`docs/agnos_19_8.md`). 19.8의 `/lib/firmware/amdgpu`에는
@@ -64,3 +81,4 @@ MD v3는 원본에서 은퇴했다. 목록에는 안 나오고, 예전에 받아
 - `selfdrive/selfdrived/selfdrived.py`: 첫 eGPU 로딩 중에는 레이더·통신 오류 대신 "System Initializing"으로 인게이지만 막음
 - `launch_chffrplus.sh`: 부팅마다 모델 선택 고정, eGPU가 있으면 설치·검증, 백그라운드 받기
 - 당근웹: `/api/egpu/model*` API와 기기 설정의 eGPU 모델 패널(`js/pages/egpu.js`)
+- 콤마 화면: `selfdrive/ui/ui_state.py`(1초마다 상태 읽기), `selfdrive/ui/onroad/egpu_badge.py`, C3·C4 `hud_renderer.py`
