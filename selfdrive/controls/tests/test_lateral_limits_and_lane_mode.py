@@ -137,7 +137,7 @@ def test_lead_lane_mode_turns_on_after_half_a_second_and_off_after_two():
 def test_lateral_planner_ors_lead_lane_mode_into_the_speed_rule():
   src = (ROOT / "selfdrive" / "controls" / "lib" / "lateral_planner.py").read_text()
   assert "self.useLaneLineMode = self.speed_lane_mode or (lead_lane_mode and not self.laneless_only)" in src
-  assert "lead = bool(sm.alive['radarState'] and radar.leadOne.status)" in src
+  assert "lead = bool(sm.alive['radarState'] and sm.valid['radarState'] and radar.leadOne.status)" in src   # Codex F3
   # the speed rule itself is unchanged: off when UseLaneLineSpeed is 0 or the model-speed guard is on
   assert "if self.useLaneLineSpeedApply == 0 or self.laneless_only:\n      self.speed_lane_mode = False" in src
   for speed_mode, lead_mode, laneless_only in np.ndindex(2, 2, 2):

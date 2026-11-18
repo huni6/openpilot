@@ -9,7 +9,13 @@
 | 레인모드 | `LanelessCurvature`(레인리스 전환 곡률), `LaneModeWithLead`(앞차 있으면 레인모드) | 새로 작성 |
 | 차량 제원 | `VehicleCenterToFrontRatio`(무게중심 앞축 거리 비율) | leehyuk1108/carrotpilot WIP-FR |
 
-설정은 모두 재부팅 없이 바뀐다. 기본값은 이전 동작과 같다. 다만 횡가속 한도는 아래처럼 속도 구간이 ej식으로 바뀌었다.
+설정은 모두 재부팅 없이 바뀐다. 기본값에서 이전과 달라지는 것은 두 가지다.
+
+- **최소거리 클램프는 ej·WIP-FR처럼 켜진 채로 들어간다.** 그래서 레인리스에서 모델 계획이 선에 20cm 넘게 붙으면 보정과 띵 알림이 걸린다.
+  Codex 비교로는 60km/h에서 계획이 왼쪽 선 95cm 안쪽일 때 곡률 0.00288(횡가속 0.8m/s²)이 더해졌다. 이전처럼 쓰려면 `ClampEnable`을 끈다.
+- 횡가속 한도의 속도 구간이 ej식으로 바뀌었다(아래).
+
+나머지 새 설정은 기본값이 꺼짐이거나 이전 값과 같다.
 
 ## 1. ej 조향 수정
 
@@ -87,14 +93,16 @@ WIP-FR의 실시간 차량 제원(WIP-FR `docs/live_vehicle_specs_20261020.md`)�
   - 앞뒤 타이어 강성을 새 축 하중에 맞게 다시 계산한다.
   - paramsd는 칼만 필터 상수를 바꾸고(학습한 조향비·강성은 유지), 적용값을 `liveParameters.vehicleDynamics`로 보낸다.
   - controlsd(VehicleModel)와 레인모드 플래너(MPC 차량 계수)는 이 값만 쓴다. 메시지가 없거나 이상하면 마지막 값을 유지한다.
+  - 받는 쪽도 초당 0.03(paramsd 속도의 1.5배)까지만 따라간다(`DynamicsFollower`). 그래서 `liveParameters`가 잠깐 무효였다가
+    돌아와도 그동안 쌓인 변화가 한 번에 들어가지 않는다(Codex F5). 정상 램프는 늦지 않게 그대로 따라간다.
 - 실측 근거 없이 조향감을 맞추려고 바꾸지 말 것.
 
 ## 검증한 것과 못 한 것
 
 - 맥 테스트
-  - 제어: `selfdrive/controls/tests/test_min_distance_clamp.py`(WIP-FR 테스트), `test_lateral_limits_and_lane_mode.py`, `test_vehicle_dynamics_consumers.py` 80개
+  - 제어: `selfdrive/controls/tests/test_min_distance_clamp.py`(WIP-FR 테스트), `test_lateral_limits_and_lane_mode.py`, `test_vehicle_dynamics_consumers.py` 82개
   - 무게중심: `common/tests/test_vehicle_dynamics.py` 45개
-  - 당근 서버: `selfdrive/carrot/server/tests` 58개(새 `test_vehicle_center_ratio.py` 포함)
+  - 당근 서버: `selfdrive/carrot/server/tests` 60개(새 `test_vehicle_center_ratio.py` 포함)
 - 실제 controlsd·lateral planner를 맥에서 돌렸다. 네이티브 IPC·Params·MPC만 대신하고, 메시지는 실제 capnp, 차량은 opendbc의 EV6 CarParams다.
   - 레인리스에서 왼쪽 차선 95cm 붙은 계획: 보정 0.00128(순수추종 계산값과 같음)이 들고 띵 플래그가 선다. 클램프를 끄면 0이다.
   - 레인모드에서 곡률 0.002 → 0.006(설정 40): 레인리스로 가고, 0.002로 돌아온 뒤 0.5초엔 그대로 레인리스, 1.5초엔 레인모드다. 설정 0이면 안 바뀐다.
@@ -107,6 +115,13 @@ WIP-FR의 실시간 차량 제원(WIP-FR `docs/live_vehicle_specs_20261020.md`)�
   - 무게중심 +/−로 0.51·0.52가 저장되고, 0.50으로 돌리면 0(차량 값 따름)이 저장된다.
   - 70은 거부된다.
   - 토글·곡률·new ui 0~3 버튼도 저장값을 확인했다.
+- Codex 교차검토(27595aa7, 같은 테스트 505개 통과 확인)에서 나온 지적과 처리
+  - F1 클램프 기본 켜짐: ej·WIP-FR과 같게 두고 위에 적었다.
+  - F2 도로경계·차선 배열이 깨진 모델 메시지에서 경로 클램프가 예외를 내 plannerd가 멈출 수 있음: 배열을 확인하고, 계산이 안 되면 경로를 그대로 둔다.
+    WIP-FR의 같은 코드에도 있는 결함이다.
+  - F3 무효 `radarState`의 앞차도 앞차로 셈: `valid`도 확인한다.
+  - F4 전체 설정 초기화가 무게중심을 차량 비율 숫자로 저장함: 초기화·프로필·복원도 0(차량 값 따름)으로 저장한다.
+  - F5 위 `DynamicsFollower`.
 - 못 함
   - 이 브랜치를 올린 실기기 부팅과 주행(EV6), 실제 Params 네이티브 등록 확인
   - 레인리스 보정·곡률 전환·앞차 레인모드의 실주행 느낌

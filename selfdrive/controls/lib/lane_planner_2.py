@@ -108,7 +108,8 @@ class LanePlanner:
       self.re_y = np.array(edges[1].y) - md.roadEdgeStds[1] * mdc.EDGE_STD_MARGIN
       self.edge_x = np.array(edges[0].x)
       self.le_std, self.re_std = float(md.roadEdgeStds[0]), float(md.roadEdgeStds[1])
-      self.edges_valid = True
+      # the clamp interpolates the edges along edges[0].x: usable only when every array is whole
+      self.edges_valid = all(len(a) == TRAJECTORY_SIZE for a in (edges[0].x, edges[0].y, edges[1].x, edges[1].y))
     else:
       self.le_y = self.lll_y
       self.re_y = self.rll_y
@@ -287,14 +288,20 @@ class LanePlanner:
     strength = mdc.fade_in(v_ego)
     if strength <= 0.0:
       return path_xyz
-    left_on, right_on = self.clamp_lines.update(self.l_prob, self.r_prob)
+    # a lane line message whose arrays do not fit together gives no line bound (the road edge may still)
+    lines_ok = len(self.ll_x) >= 2 and len(self.ll_x) == len(self.lll_y) == len(self.rll_y)
+    left_on, right_on = self.clamp_lines.update(self.l_prob if lines_ok else None, self.r_prob if lines_ok else None)
     path_x = path_xyz[:, 0]
     edges = self.edges_valid
-    lo, hi = mdc.bounds(np.interp(path_x, self.ll_x, self.lll_y), np.interp(path_x, self.ll_x, self.rll_y),
-                        np.interp(path_x, self.edge_x, self.le_y) if edges else 0.0,
-                        np.interp(path_x, self.edge_x, self.re_y) if edges else 0.0,
-                        left_on, right_on, self.le_std if edges else math.inf, self.re_std if edges else math.inf,
-                        settings)
+    try:
+      lo, hi = mdc.bounds(np.interp(path_x, self.ll_x, self.lll_y) if lines_ok else 0.0,
+                          np.interp(path_x, self.ll_x, self.rll_y) if lines_ok else 0.0,
+                          np.interp(path_x, self.edge_x, self.le_y) if edges else 0.0,
+                          np.interp(path_x, self.edge_x, self.re_y) if edges else 0.0,
+                          left_on, right_on, self.le_std if edges else math.inf, self.re_std if edges else math.inf,
+                          settings)
+    except (ValueError, TypeError, IndexError):
+      return path_xyz   # model data that cannot be worked out: leave the plan as it is (never stop plannerd)
     lo = np.where(np.isfinite(lo), lo, -np.inf) * np.ones_like(path_x)   # NaN from the model: no bound on that side
     hi = np.where(np.isfinite(hi), hi, np.inf) * np.ones_like(path_x)
     if not np.isfinite(lo).any() and not np.isfinite(hi).any():

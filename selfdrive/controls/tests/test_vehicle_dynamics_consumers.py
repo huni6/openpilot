@@ -5,9 +5,11 @@ from pathlib import Path
 from types import SimpleNamespace as NS
 
 import numpy as np
+import pytest
 
 from openpilot.common.tests.test_vehicle_dynamics import car_params, messages
-from openpilot.common.vehicle_dynamics import VehicleDynamics, read_live_vehicle_dynamics
+from openpilot.common.vehicle_dynamics import (CENTER_RATIO_RATE_S, CONSUMER_RATE_MARGIN, DynamicsFollower, VehicleDynamics,
+                                              read_live_vehicle_dynamics)
 from cereal import log
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -27,19 +29,53 @@ def method(path, class_name, method_name, namespace, *, stop_before=None):
 
 def test_lateral_planner_refreshes_factors_and_holds_on_invalid_snapshot():
   cp = car_params()
-  dynamics = VehicleDynamics.from_car_params(cp).scaled(cp.mass, 1.45)
+  dynamics = VehicleDynamics.from_car_params(cp).scaled(cp.mass, 1.15)   # 0.40 -> about 0.397: one short ramp
   sm = messages(cp, dynamics)
-  planner = NS(CP=cp)
+  planner = NS(CP=cp, dynamics_follower=DynamicsFollower(cp))
+  clock = NS(t=100.0)
   update = method(ROOT / "selfdrive/controls/lib/lateral_planner.py", "LateralPlanner", "update",
-                  {"read_live_vehicle_dynamics": read_live_vehicle_dynamics}, stop_before="self.readParams")
-  update(planner, sm, None)
-  assert planner.factor1 == cp.wheelbase - dynamics.centerToFront
-  assert planner.factor2 == dynamics.centerToFront * dynamics.mass / (cp.wheelbase * dynamics.tireStiffnessRear)
+                  {"read_live_vehicle_dynamics": read_live_vehicle_dynamics, "time": NS(monotonic=lambda: clock.t)},
+                  stop_before="self.readParams")
+  for _ in range(40):   # 2 s at 20 Hz
+    update(planner, sm, None)
+    clock.t += 0.05
+  assert planner.factor1 == pytest.approx(cp.wheelbase - dynamics.centerToFront)
+  assert planner.factor2 == pytest.approx(dynamics.centerToFront * dynamics.mass / (cp.wheelbase * dynamics.tireStiffnessRear))
   before = (planner.factor1, planner.factor2)
   sm.checks = False
   sm["liveParameters"].vehicleDynamics.centerToFront = 1.0
   update(planner, sm, None)
   assert (planner.factor1, planner.factor2) == before
+
+
+def test_a_snapshot_after_a_gap_is_followed_at_the_ramp_rate_not_at_once():
+  cp = car_params()
+  base = VehicleDynamics.from_car_params(cp)
+  follower = DynamicsFollower(cp)
+  t = 50.0
+  assert follower.update(base, t) is None
+  step_limit = cp.wheelbase * CENTER_RATIO_RATE_S * CONSUMER_RATE_MARGIN * 0.05
+  # paramsd ramped 0.40 -> 0.44 while liveParameters was invalid; the first valid snapshot after the gap
+  jumped = base.scaled(cp.mass, cp.wheelbase * 0.44)
+  t += 2.0
+  first = follower.update(jumped, t)
+  assert first.centerToFront - base.centerToFront <= cp.wheelbase * CENTER_RATIO_RATE_S * CONSUMER_RATE_MARGIN * 0.1 + 1e-12
+  previous = first
+  for _ in range(200):
+    t += 0.05
+    current = follower.update(jumped, t) or previous
+    assert current.centerToFront - previous.centerToFront <= step_limit + 1e-12
+    previous = current
+  assert previous == jumped                          # caught up, and exactly paramsd's snapshot
+  # a normal ramp (paramsd 0.02/s, 20 Hz) is followed without falling behind
+  follower, t = DynamicsFollower(cp), 0.0
+  front = base.centerToFront
+  follower.update(base, t)
+  for _ in range(100):
+    t += 0.05
+    front += cp.wheelbase * CENTER_RATIO_RATE_S * 0.05
+    applied = follower.update(base.scaled(cp.mass, front), t)
+    assert applied is not None and applied.centerToFront == pytest.approx(front)
 
 
 def test_learner_updates_all_globals_without_resetting_learned_state():

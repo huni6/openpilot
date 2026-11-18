@@ -337,3 +337,25 @@ def test_a_broken_line_keeps_blocking_the_road_edge_while_it_stays_broken():
     good = model(path_y=-1.75 + 0.9 if side == 1 else 1.75 - 0.9, left_edge=-2.0, right_edge=2.0)
     out, clock = run(c, good, 25.0, 2.0, clock=clock)     # the lines come back: it corrects again
     assert out != 0.0
+
+
+# ---- Codex review of cluster_egpu 27595aa7 (F2): broken edge or line arrays must not stop plannerd
+
+def test_lane_mode_path_clamp_survives_broken_edge_and_line_arrays():
+  lp = lane_planner()
+  md = NS(laneLines=[line(-5.25), line(-1.75), line(1.75), line(5.25)], laneLineProbs=[0.5, 0.9, 0.9, 0.5],
+          laneLineStds=[0.1, 0.1, 0.1, 0.1], roadEdges=[line(-3.5), line(3.5)], roadEdgeStds=[0.2, 0.2],
+          meta=NS(desireState=[]))
+  md.roadEdges[0].x = []                                  # t and y whole, x empty
+  lp.parse_model(md)
+  assert not lp.edges_valid
+  lp.l_prob = lp.r_prob = 0.9
+  path = np.stack([X, np.full(33, -0.95), np.zeros(33)], axis=1)
+  out = lp.apply_min_distance_clamp(path.copy(), 25.0, now=500.0)
+  assert out[:, 1].min() == pytest.approx(-0.40)           # the lines still bound it
+  lp.lll_y = np.zeros(5)                                  # a line message that does not fit its x
+  out = lp.apply_min_distance_clamp(path.copy(), 25.0, now=501.0)
+  assert np.allclose(out[:, 1], path[:, 1])               # no line bound, no usable edge: left as it is
+  lp.edges_valid, lp.edge_x = True, np.zeros(2)            # and edges that still break the interpolation
+  out = lp.apply_min_distance_clamp(path.copy(), 25.0, now=502.0)
+  assert np.allclose(out[:, 1], path[:, 1])

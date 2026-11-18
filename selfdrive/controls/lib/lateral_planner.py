@@ -10,7 +10,7 @@ import cereal.messaging as messaging
 from cereal import log
 
 from openpilot.common.params import Params
-from openpilot.common.vehicle_dynamics import read_live_vehicle_dynamics
+from openpilot.common.vehicle_dynamics import DynamicsFollower, read_live_vehicle_dynamics
 #from openpilot.selfdrive.controls.lib.lane_planner import LanePlanner
 from openpilot.selfdrive.controls.lib.lane_planner_2 import LanePlanner
 from openpilot.selfdrive.controls.lib.min_distance_clamp import read_clamp_settings
@@ -38,6 +38,7 @@ class LateralPlanner:
 
     # Vehicle model parameters used to calculate lateral movement of car (VehicleCenterToFrontRatio updates them below)
     self.CP = CP
+    self.dynamics_follower = DynamicsFollower(CP)
     self.factor1 = CP.wheelbase - CP.centerToFront
     self.factor2 = (CP.centerToFront * CP.mass) / (CP.wheelbase * CP.tireStiffnessRear)
     self.last_cloudlog_t = 0
@@ -89,7 +90,7 @@ class LateralPlanner:
 
   def update(self, sm, carrot):
     global LATERAL_ACCEL_COST, LATERAL_JERK_COST, STEERING_RATE_COST
-    dynamics = read_live_vehicle_dynamics(sm, self.CP)
+    dynamics = self.dynamics_follower.update(read_live_vehicle_dynamics(sm, self.CP), time.monotonic())
     if dynamics is not None:
       self.factor1 = dynamics.wheelbase - dynamics.centerToFront
       self.factor2 = dynamics.centerToFront * dynamics.mass / (dynamics.wheelbase * dynamics.tireStiffnessRear)
@@ -148,7 +149,7 @@ class LateralPlanner:
       self.speed_lane_mode = False
     # LaneModeWithLead: lane mode also while a lead car is ahead (lane_mode_switch.py); the model-speed guard still wins
     radar = sm['radarState']
-    lead = bool(sm.alive['radarState'] and radar.leadOne.status)
+    lead = bool(sm.alive['radarState'] and sm.valid['radarState'] and radar.leadOne.status)   # invalid or stale: no lead
     lead_lane_mode = self.lead_lane_mode.update(self.lead_lane_mode_enabled, lead, time.monotonic())
     self.useLaneLineMode = self.speed_lane_mode or (lead_lane_mode and not self.laneless_only)
 

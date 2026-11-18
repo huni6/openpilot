@@ -127,6 +127,32 @@ def move_towards(current, target, limit):
   return current + max(-limit, min(target - current, limit))
 
 
+CONSUMER_RATE_MARGIN = 1.5   # a consumer may move up to 1.5x paramsd's rate, so it keeps up with a normal ramp
+
+
+class DynamicsFollower:
+  """A consumer's applied dynamics (controlsd's VehicleModel, the lateral planner's MPC factors): it moves toward the
+  latest valid snapshot at most CENTER_RATIO_RATE_S x CONSUMER_RATE_MARGIN, so a snapshot that arrives after a gap
+  (liveParameters invalid or late while the ratio kept ramping in paramsd) is not applied in one step. None from
+  update() means nothing changed."""
+  def __init__(self, cp):
+    self.base = VehicleDynamics.from_car_params(cp)
+    self.current = self.base
+    self.last_time = None
+
+  def update(self, snapshot, now):
+    last, self.last_time = self.last_time, now
+    if snapshot is None or not math.isfinite(now):
+      return None
+    dt = 0.0 if last is None else max(0.0, min(now - last, 0.1))
+    limit = self.base.wheelbase * CENTER_RATIO_RATE_S * CONSUMER_RATE_MARGIN * dt
+    front = move_towards(self.current.centerToFront, snapshot.centerToFront, limit)
+    if front == self.current.centerToFront:
+      return None
+    self.current = self.base.scaled(self.base.mass, front)
+    return self.current
+
+
 def read_live_vehicle_dynamics(sm, cp):
   """The applied snapshot from liveParameters; None (keep the last model) for old recordings, mixed versions or an
   invalid message."""

@@ -9,7 +9,7 @@ from openpilot.common.constants import CV
 from openpilot.common.params import Params
 from openpilot.common.realtime import config_realtime_process, Priority, Ratekeeper
 from openpilot.common.swaglog import cloudlog
-from openpilot.common.vehicle_dynamics import read_live_vehicle_dynamics
+from openpilot.common.vehicle_dynamics import DynamicsFollower, read_live_vehicle_dynamics
 import numpy as np
 from collections import deque
 
@@ -95,6 +95,7 @@ class Controls:
     self.curve_laneless = CurveLaneless()
     self.laneless_curvature = self.read_laneless_curvature()
     self.lanefull_mode_enabled = False
+    self.dynamics_follower = DynamicsFollower(self.CP)   # VehicleCenterToFrontRatio, from paramsd's snapshot
 
   def read_lat_accel_limits(self) -> tuple[float, float]:
     # Params.get casts in Python (a corrupt value becomes None); get_int's native std::stoi would abort on one
@@ -143,7 +144,7 @@ class Controls:
     CS = self.sm['carState']
 
     # Update VehicleModel (VehicleCenterToFrontRatio arrives as paramsd's applied snapshot; none keeps the last one)
-    dynamics = read_live_vehicle_dynamics(self.sm, self.CP)
+    dynamics = self.dynamics_follower.update(read_live_vehicle_dynamics(self.sm, self.CP), time.monotonic())
     if dynamics is not None:
       self.VM.update_dynamics(dynamics)
     lp = self.sm['liveParameters']
