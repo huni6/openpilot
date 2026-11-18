@@ -808,11 +808,19 @@ function getSettingControlConfig(p) {
   const min = Number(p?.min);
   const max = Number(p?.max);
   const unit = Math.max(1, Number(p?.unit) || 1);
-  const optionCount = Number.isFinite(min) && Number.isFinite(max) ? Math.floor(max - min + 1) : 0;
+  // Optional catalog list of the only allowed values (NewUi offers 0 and 3, numbered as on WIP-FR).
+  const values = Array.isArray(p?.values)
+    ? p.values.map(Number).filter((v) => Number.isInteger(v) && v >= min && v <= max)
+    : null;
+  const optionCount = values && values.length
+    ? values.length
+    : (Number.isFinite(min) && Number.isFinite(max) ? Math.floor(max - min + 1) : 0);
   let kind = override.kind || "slider";
 
   if (!override.kind) {
-    if (min === 0 && max === 1) {
+    if (values && values.length >= 2 && values.length <= 4) {
+      kind = "segmented";
+    } else if (min === 0 && max === 1) {
       kind = "toggle";
     } else if (Number.isInteger(min) && Number.isInteger(max) && optionCount >= 2 && optionCount <= 4) {
       kind = "segmented";
@@ -823,7 +831,7 @@ function getSettingControlConfig(p) {
     }
   }
 
-  return { kind, min, max, unit, optionCount };
+  return { kind, min, max, unit, optionCount, values: values && values.length ? values : null };
 }
 
 function getSettingDisplayUnit(name) {
@@ -911,6 +919,7 @@ function setSettingItemsTitle(label) {
 
 function getSettingOptionValues(config) {
   if (!config || !Number.isInteger(config.min) || !Number.isInteger(config.max)) return [];
+  if (Array.isArray(config.values) && config.values.length) return config.values.slice();
   const out = [];
   for (let value = config.min; value <= config.max; value += 1) out.push(value);
   return out;
@@ -2815,6 +2824,10 @@ async function renderItems(group, options = {}) {
       let next = clamp(num, min, max);
       if (Number.isInteger(min) && Number.isInteger(max)) {
         next = Math.round(next);
+      }
+      if (controlConfig.values) {
+        // Only listed values are allowed: take the nearest one.
+        next = controlConfig.values.reduce((best, v) => (Math.abs(v - next) < Math.abs(best - next) ? v : best));
       }
       return next;
     }

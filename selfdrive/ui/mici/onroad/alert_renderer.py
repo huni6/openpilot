@@ -148,8 +148,17 @@ class AlertRenderer(Widget):
     self._prev_alert = ret
     return ret
 
-  def will_render(self) -> tuple[Alert | None, bool]:
+  def _shown_alert(self) -> Alert | None:
     alert = self.get_alert(ui_state.sm)
+    if alert is not None and getattr(ui_state, "robot_ui", False) and alert.status != AlertStatus.critical:
+      # NewUi 3 (robot face): the face reacts to these itself, so they do not cover it. Critical (red) alerts
+      # still show; alert sounds and decisions are unchanged.
+      alert = None
+      self._prev_alert = None
+    return alert
+
+  def will_render(self) -> tuple[Alert | None, bool]:
+    alert = self._shown_alert()
     return alert or self._prev_alert, alert is None
 
   def _icon_helper(self, alert: Alert) -> AlertLayout:
@@ -222,7 +231,7 @@ class AlertRenderer(Widget):
     return AlertLayout(text_rect, icon_layout)
 
   def _render(self, rect: rl.Rectangle) -> bool:
-    alert = self.get_alert(ui_state.sm)
+    alert = self._shown_alert()
 
     # Animate fade and slide in/out
     self._alert_y_filter.update(self._rect.y - 50 if alert is None else self._rect.y)

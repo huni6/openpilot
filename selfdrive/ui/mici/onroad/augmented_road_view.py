@@ -172,6 +172,7 @@ class AugmentedRoadView(CameraView):
 
     self._fade_texture = gui_app.texture("icons_mici/onroad/onroad_fade.png")
     self._fade_alpha_filter = FirstOrderFilter(0, 0.1, 1 / gui_app.target_fps)
+    self._robot_face = None  # NewUi 3, created on first use
 
     # debug
     self._pm = messaging.PubMaster(['uiDebug'])
@@ -203,11 +204,15 @@ class AugmentedRoadView(CameraView):
     # Update calibration before rendering
     self._update_calibration()
 
+    # NewUi 3: while onroad the robot face replaces the camera, model, HUD and driver monitoring icon, using the
+    # whole display (no right status rail). Alerts the face does not react to itself still draw on top.
+    robot_ui = ui_state.started and getattr(ui_state, "robot_ui", False)
+
     # Create inner content area with border padding
     self._content_rect = rl.Rectangle(
       self.rect.x,
       self.rect.y,
-      self.rect.width - SIDE_PANEL_WIDTH,
+      self.rect.width - (0 if robot_ui else SIDE_PANEL_WIDTH),
       self.rect.height,
     )
 
@@ -221,23 +226,26 @@ class AugmentedRoadView(CameraView):
     )
 
     road_view_mode = self._road_view_mode()
-    if road_view_mode in (2, 3):
+    if robot_ui:
+      self._robot().render(self._content_rect)
+    elif road_view_mode in (2, 3):
       rl.draw_rectangle_rec(self._content_rect, rl.BLACK)
     else:
       # Render the base camera view
       super()._render(self._content_rect)
 
-    if road_view_mode in (0, 2):
-      # Draw all UI overlays
-      self._model_renderer.render(self._content_rect)
+    if not robot_ui:
+      if road_view_mode in (0, 2):
+        # Draw all UI overlays
+        self._model_renderer.render(self._content_rect)
 
-    # Fade out bottom of overlays for looks
-    rl.draw_texture_ex(self._fade_texture, rl.Vector2(self._content_rect.x, self._content_rect.y), 0.0, 1.0, rl.WHITE)
+      # Fade out bottom of overlays for looks
+      rl.draw_texture_ex(self._fade_texture, rl.Vector2(self._content_rect.x, self._content_rect.y), 0.0, 1.0, rl.WHITE)
 
     alert_to_render, not_animating_out = self._alert_renderer.will_render()
 
     # Hide DMoji when disengaged unless AlwaysOnDM is enabled
-    should_draw_dmoji = (not self._hud_renderer.drawing_top_icons() and ui_state.is_onroad() and
+    should_draw_dmoji = (not robot_ui and not self._hud_renderer.drawing_top_icons() and ui_state.is_onroad() and
                          (ui_state.status != UIStatus.DISENGAGED or ui_state.always_on_dm))
     self._driver_state_renderer.set_should_draw(should_draw_dmoji)
     self._driver_state_renderer.set_position(self._rect.x + 16, self._rect.y + 10)
@@ -247,7 +255,11 @@ class AugmentedRoadView(CameraView):
     self._hud_renderer.set_wheel_critical_icon(alert_to_render is not None and not not_animating_out and
                                                alert_to_render.visual_alert == car.CarControl.HUDControl.VisualAlert.steerRequired)
     # TODO: have alert renderer draw offroad mici label below
-    self._hud_renderer.render(self._content_rect)
+    if robot_ui:
+      # The eGPU state stays visible over the face; the rest of the HUD is replaced by it.
+      self._hud_renderer.draw_egpu_status(self._content_rect)
+    else:
+      self._hud_renderer.render(self._content_rect)
     if ui_state.started:
       self._alert_renderer.render(self._content_rect)
       self._hud_renderer.draw_jetlink_status(self._content_rect, alert_to_render)
@@ -260,9 +272,10 @@ class AugmentedRoadView(CameraView):
 
     # Custom UI extension point - add custom overlays here
     # Use self._content_rect for positioning within camera bounds
-    self._traffic_light.render(self.rect)
-    if not self._traffic_light.is_visible():
-      self._confidence_ball.render(self.rect)
+    if not robot_ui:
+      self._traffic_light.render(self.rect)
+      if not self._traffic_light.is_visible():
+        self._confidence_ball.render(self.rect)
 
     self._bookmark_icon.render(self.rect)
 
@@ -280,6 +293,12 @@ class AugmentedRoadView(CameraView):
     msg = messaging.new_message('uiDebug')
     msg.uiDebug.drawTimeMillis = (time.monotonic() - start_draw) * 1000
     self._pm.send('uiDebug', msg)
+
+  def _robot(self):
+    if self._robot_face is None:
+      from openpilot.selfdrive.ui.mici.onroad.robot_face import RobotFace
+      self._robot_face = RobotFace()
+    return self._robot_face
 
   def _road_view_mode(self):
     mode = ui_state.show_model_view

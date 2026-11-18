@@ -438,6 +438,7 @@
           "en": "On-screen Info",
           "zh": "信息显示",
           "params": [
+            "NewUi",
             "ShowDebugUI",
             "ShowTpms",
             "ShowDateTime",
@@ -2895,6 +2896,26 @@
       "max": 3,
       "default": 0,
       "unit": 1
+    },
+    {
+      "group": "화면",
+      "name": "NewUi",
+      "title": "new ui",
+      "descr": "C4 온로드 화면을 고릅니다.\n0: 기존 당근 UI\n3: 로봇 얼굴. 주행 중 카메라·차선·속도 표시를 끄고, 빛나는 두 눈이 차 상태에 따라 표정을 바꿉니다(인게이지하면 핸들을 잡고 실제 조향 방향으로 돌림, 차선 변경, 사각지대, 급제동, 운전자 감시 경고, 안전벨트, 후진·주차 기어, 비상등, 설정속도 변경, 오래 정차). 빨간 위급 경고와 eGPU 상태 배지는 얼굴 위에 그대로 뜹니다.\n1·2는 WIP-FR의 다른 화면 번호라 이 브랜치에는 없습니다.\n재부팅 없이 적용되며 주행 제어·경고 판단·경고음은 바뀌지 않습니다. comma 3·3X 화면은 그대로입니다.",
+      "egroup": "DISPLAY",
+      "etitle": "new ui",
+      "edescr": "Choose the C4 onroad display.\n0: Carrot UI\n3: Robot face. While driving, the camera, lanes and speed panel are turned off and two glowing eyes change expression with the car state (engaging grabs a steering wheel that turns with the real steering, lane changes, blind spot, hard braking, driver-monitoring alerts, seatbelt, reverse and park, hazard lights, set-speed changes, long stops). Red critical alerts and the eGPU status badge still appear over the face.\n1 and 2 are other WIP-FR displays and do not exist on this branch.\nApplies without rebooting; driving control, alert decisions and alert sounds are unchanged. The comma 3/3X display is unchanged.",
+      "cgroup": "显示",
+      "ctitle": "new ui",
+      "cdescr": "选择 C4 行车界面。\n0：原界面\n3：机器人表情。行车时关闭摄像头、车道和速度面板，两只发光的眼睛随车辆状态变化表情（接管时握住方向盘并随实际转向转动、变道、盲区、急刹、驾驶员监控警告、安全带、倒车和驻车挡、双闪、设定速度变化、长时间停车）。红色紧急警告和 eGPU 状态标志仍显示在上方。\n1 和 2 是 WIP-FR 的其他界面，本分支没有。\n无需重启，不改变车辆控制、警告判断和警告音。comma 3/3X 界面不变。",
+      "min": 0,
+      "max": 3,
+      "default": 0,
+      "unit": 1,
+      "values": [
+        0,
+        3
+      ]
     },
     {
       "group": "외부 HUD",

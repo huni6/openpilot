@@ -284,8 +284,12 @@ class HudRenderer(Widget):
 
     self._draw_steering_wheel(rect)
 
-    # eGPU status at the top right (as in carrot-wip). Drawn before alerts, which
-    # cover it; the Jetson badge keeps its bottom-right place.
+    self.draw_egpu_status(rect)
+
+  def draw_egpu_status(self, rect: rl.Rectangle) -> None:
+    """eGPU status at the top right (as in carrot-wip), also over the NewUi 3 robot face.
+
+    Drawn before alerts, which cover it; the Jetson badge keeps its bottom-right place."""
     if ui_state.egpu_badge:
       draw_jetlink_badge(ui_state.egpu_badge, rl.Rectangle(rect.x + rect.width - 24 - 160, rect.y + 12, 160, 34), 22)
 

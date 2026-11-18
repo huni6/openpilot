@@ -15,6 +15,17 @@ from openpilot.system.hardware import HARDWARE, PC
 
 BACKLIGHT_OFFROAD = 65 if HARDWARE.get_device_type() == "mici" else 50
 
+# NewUi, numbered as on WIP-FR so a stored value means the same on both branches: 0 = Carrot UI, 3 = robot face
+# (comma 4 only). WIP-FR's 1 (Wayon/sunnypilot style) and 2 (clock) do not exist here and show the Carrot UI.
+NEW_UI_CARROT = 0
+NEW_UI_ROBOT = 3
+NEW_UI_CHECK_S = 0.5   # how often the setting is re-read, so a change applies without a reboot
+
+
+def new_ui_mode(value) -> int:
+  """Map a stored NewUi value to a mode this branch has."""
+  return NEW_UI_ROBOT if isinstance(value, int) and not isinstance(value, bool) and value == NEW_UI_ROBOT else NEW_UI_CARROT
+
 
 class UIStatus(Enum):
   DISENGAGED = "disengaged"
@@ -102,6 +113,10 @@ class UIState:
     self.usbgpu_recovery_badge: tuple[str, str] | None = None
     self.egpu_badge: tuple[str, str] | None = None
     self._egpu_update_time: float = float('-inf')
+    # NewUi 3: the comma 4 onroad screen shows the robot face instead of the camera, model and HUD.
+    self.new_ui_mode: int = NEW_UI_CARROT
+    self.robot_ui: bool = False
+    self._new_ui_update_time: float = float('-inf')
 
     # Callbacks
     self._offroad_transition_callbacks: list[Callable[[], None]] = []
@@ -136,6 +151,7 @@ class UIState:
     self._update_status()
     self._update_jetlink_status()
     self._update_egpu_status()
+    self._update_new_ui()
     if time.monotonic() - self._param_update_time > 5.0:
       self.update_params()
     device.update()
@@ -153,6 +169,18 @@ class UIState:
     if (badge, detail) != (self.jetlink_badge, self.jetlink_detail):
       self.jetlink_detail_since = now
     self.jetlink_badge, self.jetlink_detail = badge, detail
+
+  def _update_new_ui(self) -> None:
+    now = time.monotonic()
+    if now - self._new_ui_update_time < NEW_UI_CHECK_S:
+      return
+    self._new_ui_update_time = now
+    try:
+      mode = new_ui_mode(self.params.get_int("NewUi"))
+    except Exception:
+      mode = NEW_UI_CARROT
+    self.new_ui_mode = mode
+    self.robot_ui = mode == NEW_UI_ROBOT
 
   def _update_egpu_status(self) -> None:
     now = time.monotonic()

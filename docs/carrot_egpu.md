@@ -40,6 +40,7 @@ MD v3는 원본에서 은퇴했다. 목록에는 안 나오고, 예전에 받아
 ## 콤마 화면 표시 (온로드)
 
 원본 당근처럼 eGPU 상태를 배지로 띄운다. comma 3·3X는 실험 모드 버튼 왼쪽(젯슨 배지는 그 왼쪽), comma 4는 오른쪽 위다.
+comma 4에서 로봇 얼굴(`NewUi` 3, `docs/robot_face.md`)을 켜도 같은 자리에 뜬다.
 eGPU 연결 이력·설치 상태·실행 상태가 없으면 배지를 그리지 않는다.
 
 | 배지 | 색 | 뜻 |
@@ -81,4 +82,4 @@ eGPU 연결 이력·설치 상태·실행 상태가 없으면 배지를 그리�
 - `selfdrive/selfdrived/selfdrived.py`: 첫 eGPU 로딩 중에는 레이더·통신 오류 대신 "System Initializing"으로 인게이지만 막음
 - `launch_chffrplus.sh`: 부팅마다 모델 선택 고정, eGPU가 있으면 설치·검증, 백그라운드 받기
 - 당근웹: `/api/egpu/model*` API와 기기 설정의 eGPU 모델 패널(`js/pages/egpu.js`)
-- 콤마 화면: `selfdrive/ui/ui_state.py`(1초마다 상태 읽기), `selfdrive/ui/onroad/egpu_badge.py`, C3·C4 `hud_renderer.py`
+- 콤마 화면: `selfdrive/ui/ui_state.py`(1초마다 상태 읽기), `selfdrive/ui/onroad/egpu_badge.py`, C3·C4 `hud_renderer.py`(C4는 `draw_egpu_status`)
