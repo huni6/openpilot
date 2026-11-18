@@ -108,3 +108,47 @@ def test_api_rejects_a_percentage_instead_of_clamping_it(monkeypatch):
   assert res.status == 200
   res = asyncio.run(fparams.api_param_set(Req({"name": "LatJerkMax", "value": 500})))
   assert res.status == 200 and calls[-1] == ("LatJerkMax", 100)                # others are still clamped
+
+
+def test_restore_profile_and_reset_store_the_vehicles_ratio_as_zero():
+  assert sparams.center_ratio_restore_value(0.5, 0.5) == 0.0       # a profile or reset with the vehicle's ratio
+  assert sparams.center_ratio_restore_value("0", 0.5) == 0.0       # a backup of 'follow the vehicle'
+  assert sparams.center_ratio_restore_value(0.0, None) == 0.0
+  assert sparams.center_ratio_restore_value("0.45", 0.5) == pytest.approx(0.45)
+  for bad in (0.95, "x", True, None):
+    with pytest.raises(ValueError):
+      sparams.center_ratio_restore_value(bad, 0.5)
+
+
+def test_restore_preview_compares_what_the_page_shows(monkeypatch):
+  class TypedParams(FakeParams):
+    def get_type(self, key):
+      return sparams.ParamKeyType.FLOAT if key == "VehicleCenterToFrontRatio" else sparams.ParamKeyType.INT
+
+  if sparams.ParamKeyType is None:
+    import enum
+
+    class PKT(enum.IntEnum):
+      BOOL = 1
+      INT = 2
+      FLOAT = 3
+      TIME = 4
+      STRING = 0
+      JSON = 5
+      BYTES = 6
+    monkeypatch.setattr(sparams, "ParamKeyType", PKT)
+  monkeypatch.setattr(sparams, "HAS_PARAMS", True)
+  stored = {"VehicleCenterToFrontRatio": 0.0}
+  monkeypatch.setattr(sparams, "Params", lambda: TypedParams(stored))
+  monkeypatch.setattr(ssettings, "current_center_ratio_default", lambda params=None: 0.5)
+  monkeypatch.setattr(sparams, "get_param_values", lambda names, defaults: {
+    n: sparams._read_param_value(TypedParams(stored), n, None) for n in names})
+  entry = sparams.preview_param_restore_values({"VehicleCenterToFrontRatio": 0.5})["entries"][0]
+  assert entry["status"] == "same" and not entry["apply"]          # following the vehicle already
+  stored["VehicleCenterToFrontRatio"] = 0.45
+  entry = sparams.preview_param_restore_values({"VehicleCenterToFrontRatio": 0.5})["entries"][0]
+  assert entry["apply"] and entry["value"] == 0.0                  # back to following the vehicle, stored as 0
+  entry = sparams.preview_param_restore_values({"VehicleCenterToFrontRatio": 0.7})["entries"][0]
+  assert entry["apply"] and entry["value"] == pytest.approx(0.7)
+  entry = sparams.preview_param_restore_values({"VehicleCenterToFrontRatio": 1.5})["entries"][0]
+  assert entry["status"] == "invalid" and not entry["apply"]

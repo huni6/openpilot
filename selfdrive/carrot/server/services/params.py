@@ -1065,6 +1065,17 @@ def _values_equal(t: Any, left: Any, right: Any) -> bool:
     return str(left) == str(right)
 
 
+def center_ratio_restore_value(value: Any, default: Optional[float]) -> float:
+  """What a restored, profile or reset VehicleCenterToFrontRatio is stored as: 0 (a backup of 'follow the vehicle') or
+  the vehicle's own ratio follow the vehicle (0.0); another 0.10-0.90 ratio is kept; anything else is ValueError."""
+  try:
+    if not isinstance(value, bool) and float(value) == 0.0:
+      return 0.0
+  except (TypeError, ValueError, OverflowError):
+    pass
+  return center_ratio_to_store(value, default)
+
+
 def preview_param_restore_values(values: Dict[str, Any], selected_keys: Optional[List[str]] = None) -> Dict[str, Any]:
   if not HAS_PARAMS or ParamKeyType is None:
     raise RuntimeError("Params/ParamKeyType not available")
@@ -1090,6 +1101,15 @@ def preview_param_restore_values(values: Dict[str, Any], selected_keys: Optional
         status = "skipped"
         reason = "unsupported type"
         can_apply = False
+      elif key == RATIO_KEY and center_ratio_to_store is not None:
+        from .settings import current_center_ratio_default
+        vehicle_ratio = current_center_ratio_default(params)
+        normalized_value = center_ratio_restore_value(raw_value, vehicle_ratio)
+        shown = vehicle_ratio if normalized_value == 0.0 else normalized_value
+        current_value = current_values.get(key, "")
+        if shown is not None and _values_equal(t, current_value, shown):
+          status = "same"
+          can_apply = False
       else:
         normalized_value = _normalize_param_value(t, raw_value)
         current_value = current_values.get(key, "")
