@@ -93,10 +93,23 @@ def _libflags(target, source, env, for_signature):
   return _stripixes(env['LIBLINKPREFIX'], libs, env['LIBLINKSUFFIX'],
                     env['LIBPREFIXES'], env['LIBSUFFIXES'], env, env['LIBLITERALPREFIX'])
 
+# Keep the caller's PYTHONPATH (launch_chffrplus.sh puts the AGNOS 19 offline
+# wheels in pydeps there): build-time scripts such as long_mpc.py import
+# pyserial through the hardware module, and the AGNOS 19 venv lacks it.
+scons_python_paths = [
+  Dir("#").abspath,
+  Dir("#third_party/acados").abspath,
+]
+if external_pythonpath := os.environ.get("PYTHONPATH"):
+  scons_python_paths += [
+    path for path in external_pythonpath.split(os.pathsep)
+    if path and path not in scons_python_paths
+  ]
+
 env = Environment(
   ENV={
     "PATH": os.environ['PATH'],
-    "PYTHONPATH": Dir("#").abspath + ':' + Dir(f"#third_party/acados").abspath,
+    "PYTHONPATH": os.pathsep.join(scons_python_paths),
     "ACADOS_SOURCE_DIR": Dir("#third_party/acados").abspath,
     "ACADOS_PYTHON_INTERFACE_PATH": Dir("#third_party/acados/acados_template").abspath,
     "TERA_PATH": Dir("#").abspath + f"/third_party/acados/{arch}/t_renderer"
