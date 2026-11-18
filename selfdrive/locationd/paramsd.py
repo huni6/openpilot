@@ -15,6 +15,7 @@ from openpilot.selfdrive.locationd.models.car_kf import CarKalman, ObservationKi
 from openpilot.selfdrive.locationd.models.constants import GENERATED_DIR
 from openpilot.selfdrive.locationd.helpers import PoseCalibrator, Pose
 from openpilot.common.swaglog import cloudlog
+from openpilot.common.vehicle_dynamics import LiveVehicleDynamics, VehicleDynamics
 
 from openpilot.common.gps import get_gps_location_service
 
@@ -40,14 +41,8 @@ class VehicleParamsLearner:
     self.x_initial[States.ANGLE_OFFSET] = angle_offset
     self.P_initial = P_initial if P_initial is not None else CarKalman.P_initial
 
-    self.kf.set_globals(
-      mass=CP.mass,
-      rotational_inertia=CP.rotationalInertia,
-      center_to_front=CP.centerToFront,
-      center_to_rear=CP.wheelbase - CP.centerToFront,
-      stiffness_front=CP.tireStiffnessFront,
-      stiffness_rear=CP.tireStiffnessRear
-    )
+    self.dynamics = VehicleDynamics.from_car_params(CP)
+    self.kf.set_globals(**self.dynamics.kalman_globals())
 
     self.min_sr, self.max_sr = 0.5 * CP.steerRatio, 2.0 * CP.steerRatio
 
@@ -68,6 +63,15 @@ class VehicleParamsLearner:
 
     self.angle_offset, self.roll, self.active = np.degrees(self.x_initial[States.ANGLE_OFFSET].item()), 0.0, False
     self.avg_angle_offset = self.angle_offset
+
+  def update_dynamics(self, dynamics):
+    # VehicleCenterToFrontRatio (common/vehicle_dynamics.py), as WIP-FR's paramsd
+    if dynamics != self.dynamics:
+      self.kf.set_globals(**dynamics.kalman_globals())
+      # Rewinding old observations under new physical constants is inconsistent.
+      # Preserve the current estimate/covariance, but discard that old history.
+      self.kf.filter.reset_rewind()
+      self.dynamics = dynamics
 
   def handle_log(self, t: float, which: str, msg: capnp._DynamicStructReader):
     if which == 'livePose':
@@ -166,6 +170,7 @@ class VehicleParamsLearner:
     msg.valid = valid
 
     liveParameters = msg.liveParameters
+    liveParameters.vehicleDynamics = self.dynamics.to_message()
     liveParameters.posenetValid = True
     liveParameters.sensorValid = sensors_valid
     liveParameters.steerRatio = float(x[States.STEER_RATIO].item())
@@ -288,12 +293,15 @@ def main():
 
   steer_ratio, stiffness_factor, angle_offset_deg, pInitial = retrieve_initial_vehicle_params(params, CP, REPLAY, DEBUG)
   learner = VehicleParamsLearner(CP, steer_ratio, stiffness_factor, np.radians(angle_offset_deg), pInitial)
+  dynamics_tuning = None if REPLAY else LiveVehicleDynamics(CP, params)
 
   params_memory = Params("/dev/shm/params")
   params_memory.remove("LastGPSPosition")
 
   while True:
     sm.update()
+    if dynamics_tuning is not None:
+      learner.update_dynamics(dynamics_tuning.update(time.monotonic()))
     if sm.all_checks():
       for which in sorted(sm.updated.keys(), key=lambda x: sm.logMonoTime[x]):
         if sm.updated[which]:

@@ -10,8 +10,11 @@ import cereal.messaging as messaging
 from cereal import log
 
 from openpilot.common.params import Params
+from openpilot.common.vehicle_dynamics import read_live_vehicle_dynamics
 #from openpilot.selfdrive.controls.lib.lane_planner import LanePlanner
 from openpilot.selfdrive.controls.lib.lane_planner_2 import LanePlanner
+from openpilot.selfdrive.controls.lib.min_distance_clamp import read_clamp_settings
+from openpilot.selfdrive.controls.lib.lane_mode_switch import LeadLaneMode, read_lane_mode_settings
 from collections import deque
 
 TRAJECTORY_SIZE = 33
@@ -33,7 +36,8 @@ class LateralPlanner:
   def __init__(self, CP, debug=False):
     #self.DH = DesireHelper()
 
-    # Vehicle model parameters used to calculate lateral movement of car
+    # Vehicle model parameters used to calculate lateral movement of car (VehicleCenterToFrontRatio updates them below)
+    self.CP = CP
     self.factor1 = CP.wheelbase - CP.centerToFront
     self.factor2 = (CP.centerToFront * CP.mass) / (CP.wheelbase * CP.tireStiffnessRear)
     self.last_cloudlog_t = 0
@@ -61,6 +65,9 @@ class LateralPlanner:
     self.useLaneLineSpeedApply = self.params.get_int("UseLaneLineSpeed")
     self.pathOffset = float(self.params.get_int("PathOffset")) * 0.01
     self.useLaneLineMode = False
+    self.speed_lane_mode = False   # the UseLaneLineSpeed rule on its own (with its 2 km/h hysteresis)
+    self.lead_lane_mode = LeadLaneMode()
+    self.lead_lane_mode_enabled = False
     self.plan_a = np.zeros((TRAJECTORY_SIZE, ))
     self.plan_yaw = np.zeros((TRAJECTORY_SIZE,))
     self.plan_yaw_rate = np.zeros((TRAJECTORY_SIZE,))
@@ -82,6 +89,10 @@ class LateralPlanner:
 
   def update(self, sm, carrot):
     global LATERAL_ACCEL_COST, LATERAL_JERK_COST, STEERING_RATE_COST
+    dynamics = read_live_vehicle_dynamics(sm, self.CP)
+    if dynamics is not None:
+      self.factor1 = dynamics.wheelbase - dynamics.centerToFront
+      self.factor2 = dynamics.centerToFront * dynamics.mass / (dynamics.wheelbase * dynamics.tireStiffnessRear)
     self.readParams -= 1
     if self.readParams <= 0:
       self.readParams = 10
@@ -92,6 +103,8 @@ class LateralPlanner:
       LATERAL_ACCEL_COST = self.params.get_float("LatMpcAccelCost") * 0.01
       LATERAL_JERK_COST = self.params.get_float("LatMpcJerkCost") * 0.01
       STEERING_RATE_COST = self.params.get_float("LatMpcSteeringRateCost")
+      self.LP.clamp_settings = read_clamp_settings(self.params)
+      self.lead_lane_mode_enabled, _ = read_lane_mode_settings(self.params)
 
     # clip speed , lateral planning is not possible at 0 speed
     measured_curvature = sm['controlsState'].curvature
@@ -128,11 +141,16 @@ class LateralPlanner:
     #self.DH.update(sm['carState'], md, sm['carControl'].latActive, lane_change_prob, sm)
 
     if self.useLaneLineSpeedApply == 0 or self.laneless_only:
-      self.useLaneLineMode = False
+      self.speed_lane_mode = False
     elif speed_kph >= self.useLaneLineSpeedApply + 2:
-      self.useLaneLineMode = True
+      self.speed_lane_mode = True
     elif speed_kph < self.useLaneLineSpeedApply - 2:
-      self.useLaneLineMode = False
+      self.speed_lane_mode = False
+    # LaneModeWithLead: lane mode also while a lead car is ahead (lane_mode_switch.py); the model-speed guard still wins
+    radar = sm['radarState']
+    lead = bool(sm.alive['radarState'] and radar.leadOne.status)
+    lead_lane_mode = self.lead_lane_mode.update(self.lead_lane_mode_enabled, lead, time.monotonic())
+    self.useLaneLineMode = self.speed_lane_mode or (lead_lane_mode and not self.laneless_only)
 
     # Turn off lanes during lane change
     #if self.DH.desire == log.Desire.laneChangeRight or self.DH.desire == log.Desire.laneChangeLeft:
@@ -149,18 +167,25 @@ class LateralPlanner:
     self.LP.curvature = measured_curvature
     self.path_xyz, self.lanelines_active = self.LP.get_d_path(sm['carState'], v_ego_car, self.t_idxs, self.path_xyz, self.curve_speed)
 
+    self.latDebugText = self.LP.debugText
+    #self.lanelines_active = True if self.LP.d_prob > 0.3 and self.LP.lanefull_mode else False
+
+    self.path_xyz[:, 1] += self.pathOffset
+    # minimum-distance clamp on the final path (PathOffset included): it keeps off the lines and the road edge, and rests
+    # during a lane change, while a turn signal is on and 2 s after (as the laneless correction in controlsd)
+    cs = sm['carState']
+    clamp_lane_changing = md.meta.desire != log.Desire.none or md.meta.laneChangeState != log.LaneChangeState.off or \
+                          cs.leftBlinker or cs.rightBlinker
+    self.path_xyz = self.LP.apply_min_distance_clamp(self.path_xyz, v_ego_car, clamp_lane_changing)
+
     if self.lanelines_active:
+      # the heading from the clamped final path
       self.plan_yaw, self.plan_yaw_rate = yaw_from_path_no_scipy(
         self.path_xyz, self.v_plan,
         smooth_window=5,
         clip_rate=2.0,
         align_first_yaw=None #md.orientation.z[0]  # 초기 정렬
       )
-      
-    self.latDebugText = self.LP.debugText
-    #self.lanelines_active = True if self.LP.d_prob > 0.3 and self.LP.lanefull_mode else False
-
-    self.path_xyz[:, 1] += self.pathOffset
 
     self.lat_mpc.set_weights(self.lateralPathCost, self.lateralMotionCost,
                              LATERAL_ACCEL_COST, LATERAL_JERK_COST,
@@ -260,8 +285,10 @@ class LateralPlanner:
       f"{'lanemode' if self.lanelines_active else 'laneless'} | " +
       f"{self.LP.lane_width_left:.1f}m | " +
       f"{self.LP.lane_width:.1f}m | " +
-      f"{self.LP.lane_width_right:.1f}m | " +
-      f"{f'offset={self.LP.offset_total * 100.0:.1f}cm turn={np.clip(self.curve_speed, -200, 200):.0f}km/h' if self.lanelines_active else ''}"
+      f"{self.LP.lane_width_right:.1f}m" +
+      f"{f' | clamp={self.LP.clamp_sides}{self.LP.clamp_max_correction * 100.0:.0f}cm' if self.LP.clamp_max_correction > 0.005 else ''}" +
+      f"{' | lead' if self.lead_lane_mode.active else ''}" +
+      f"{f' | offset={self.LP.offset_total * 100.0:.1f}cm turn={np.clip(self.curve_speed, -200, 200):.0f}km/h' if self.lanelines_active else ''}"
     )
 
     lateralPlan.latDebugText = debugText

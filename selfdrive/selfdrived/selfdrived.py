@@ -459,6 +459,11 @@ class SelfdriveD:
       if undershooting and turning and lac.saturated:
         self.events.add(EventName.steerSaturated)
 
+    # the minimum-distance clamp's laneless correction is on (controlsd decides, with its own cooldown); a stale or
+    # invalid controlsState's last True is not a correction that is happening
+    if self.sm.valid['controlsState'] and self.sm.alive['controlsState'] and self.sm['controlsState'].clampSteerActive:
+      self.events.add(EventName.clampSteerActive)
+
     # Check for FCW
     stock_long_is_braking = self.enabled and not self.CP.openpilotLongitudinalControl and CS.aEgo < -1.25
     model_fcw = self.sm['modelV2'].meta.hardBrakePredicted and not CS.brakePressed and not stock_long_is_braking

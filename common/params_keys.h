@@ -303,6 +303,8 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"HapticFeedbackWhenSpeedCamera", {PERSISTENT, INT, "0"}},
     {"UseLaneLineSpeed", {PERSISTENT, INT, "0"}},
     {"UseLaneLineCurveSpeed", {PERSISTENT, INT, "0"}},
+    {"LanelessCurvature", {PERSISTENT, INT, "0"}},
+    {"LaneModeWithLead", {PERSISTENT, BOOL, "0"}},
 
     {"AdjustLaneOffset", {PERSISTENT, INT, "0"}},
     {"LaneChangeNeedTorque", {PERSISTENT, INT, "0"}},
@@ -321,6 +323,14 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"LatMpcInputOffset", {PERSISTENT, INT, "4"}},
 
     {"PathOffset", {PERSISTENT, INT, "0"}},
+    {"ClampEnable", {PERSISTENT, BOOL, "1"}},
+    {"ClampMinDistLane", {PERSISTENT, INT, "135"}},
+    {"ClampMinDistEdge", {PERSISTENT, INT, "115"}},
+    {"ClampSteerGain", {PERSISTENT, INT, "10"}},
+    {"ClampSteerAlert", {PERSISTENT, BOOL, "1"}},
+    {"LatAccelMaxLow", {PERSISTENT, INT, "45"}},
+    {"LatAccelMaxHigh", {PERSISTENT, INT, "30"}},
+    {"LatJerkMax", {PERSISTENT, INT, "50"}},
     {"CameraYawTrimDeg", {PERSISTENT, INT, "0"}},
 
     {"LateralTorqueCustom", {PERSISTENT, INT, "0"}},
@@ -354,6 +364,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
 
     {"CustomSR", {PERSISTENT, INT, "0"}},
     {"SteerRatioRate", {PERSISTENT, INT, "100"}},
+    {"VehicleCenterToFrontRatio", {PERSISTENT, FLOAT, "0"}},
 
     {"SoftRestartTriggered", {CLEAR_ON_MANAGER_START, INT}},
 

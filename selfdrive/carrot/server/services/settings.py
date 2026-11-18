@@ -4,6 +4,12 @@ from typing import Any, Dict, List, Tuple
 
 from ..config import DEFAULT_SETTINGS_PATH
 
+try:
+  from openpilot.common.vehicle_dynamics import RATIO_KEY, center_ratio_default
+except Exception:  # the web runs on its own too (tests, a Mac)
+  RATIO_KEY = "VehicleCenterToFrontRatio"
+  center_ratio_default = None
+
 
 # mtime-based cache for carrot_settings.json
 # - "path" is mutated by carrot_server.py at startup if --settings is passed
@@ -122,6 +128,56 @@ def build_menu_categories(data: Dict[str, Any], by_name: Dict[str, Dict[str, Any
   return cats
 
 
+def current_center_ratio_default(params=None) -> float | None:
+  """The installed vehicle's VehicleCenterToFrontRatio from CarParamsPersistent, or None before the car is known."""
+  if center_ratio_default is None:
+    return None
+  if params is None:
+    from .params import HAS_PARAMS, Params
+    if not HAS_PARAMS or Params is None:
+      return None
+    params = Params()
+  try:
+    raw = params.get("CarParamsPersistent")
+    if raw:
+      from cereal import car
+      with car.CarParams.from_bytes(raw) as cp:
+        return center_ratio_default(cp)
+  except Exception:
+    pass
+  return None
+
+
+def with_center_ratio_default(cache_parts: tuple, default: float | None) -> tuple:
+  """VehicleCenterToFrontRatio shows the installed vehicle's ratio as its default (the web's default button), and is
+  left out until the car is known rather than showing a made-up default (as WIP-FR does)."""
+  data, groups, by_name, groups_list = cache_parts
+  if RATIO_KEY not in by_name:
+    return cache_parts
+  if default is None:
+    def adapted(items):
+      return [item for item in items if item.get("name") != RATIO_KEY]
+    by_name = {name: item for name, item in by_name.items() if name != RATIO_KEY}
+  else:
+    setting = {**by_name[RATIO_KEY], "default": default}
+
+    def adapted(items):
+      return [setting if item.get("name") == RATIO_KEY else item for item in items]
+    by_name = {**by_name, RATIO_KEY: setting}
+  groups = {group: adapted(items) for group, items in groups.items()}
+  groups_list = [{**entry, "count": len(groups.get(entry.get("group"), []))} for entry in groups_list]
+  return {**data, "params": adapted(data.get("params", []))}, groups, by_name, groups_list
+
+
+def get_settings_view() -> tuple[dict[str, Any], dict[str, list], dict[str, dict[str, Any]], list[dict[str, Any]], Any]:
+  """get_settings_cached() plus the menu tree, both adapted to the current vehicle."""
+  data, groups, by_name, groups_list = get_settings_cached()
+  categories = settings_cache.get("categories")
+  if categories is not None and RATIO_KEY not in by_name:
+    categories = build_menu_categories(data, by_name)
+  return data, groups, by_name, groups_list, categories
+
+
 def get_settings_cached() -> Tuple[Dict[str, Any], Dict[str, list], Dict[str, Dict[str, Any]], List[Dict[str, Any]]]:
   path = settings_cache["path"]
   st = os.stat(path)
@@ -137,9 +193,9 @@ def get_settings_cached() -> Tuple[Dict[str, Any], Dict[str, list], Dict[str, Di
       "groups_list": groups_list,
       "categories": build_menu_categories(data, by_name),
     })
-  return (
+  return with_center_ratio_default((
     settings_cache["data"],
     settings_cache["groups"],
     settings_cache["by_name"],
     settings_cache["groups_list"],
-  )
+  ), current_center_ratio_default())

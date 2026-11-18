@@ -803,12 +803,26 @@ const SETTING_CONTROL_OVERRIDES = {
   ClusterHudRadarInfo: { kind: "select" },
 };
 
+// Settings that step in decimals (VehicleCenterToFrontRatio: unit 0.01); 0 for the usual whole-number settings.
+function getSettingDecimalUnit(p) {
+  const unit = Number(p?.unit);
+  return Number.isFinite(unit) && unit > 0 && unit < 1 ? unit : 0;
+}
+
+function getSettingDecimalPlaces(p) {
+  const unit = getSettingDecimalUnit(p);
+  if (!unit) return 0;
+  const decimals = Number(p?.display_decimals);
+  if (Number.isInteger(decimals) && decimals > 0 && decimals <= 6) return decimals;
+  return Math.min(6, Math.max(1, Math.ceil(-Math.log10(unit) - 1e-9)));
+}
+
 function getSettingControlConfig(p) {
   const override = SETTING_CONTROL_OVERRIDES[p?.name] || {};
   const min = Number(p?.min);
   const max = Number(p?.max);
-  const unit = Math.max(1, Number(p?.unit) || 1);
-  // Optional catalog list of the only allowed values (NewUi offers 0 and 3, numbered as on WIP-FR).
+  const unit = getSettingDecimalUnit(p) || Math.max(1, Number(p?.unit) || 1);
+  // Optional catalog list of the only allowed values ("values": [...]); none of the current settings uses it.
   const values = Array.isArray(p?.values)
     ? p.values.map(Number).filter((v) => Number.isInteger(v) && v >= min && v <= max)
     : null;
@@ -843,6 +857,15 @@ function getSettingDisplayUnit(name) {
 }
 
 function formatSettingDisplayValue(p, value) {
+  const def = getSettingDecimalUnit(p) ? p : (findSettingItemByName(p?.name)?.item || p);
+  const places = getSettingDecimalPlaces(def);
+  const numeric = Number(value);
+  if (places && value !== "" && value !== null && Number.isFinite(numeric)) {
+    // at least `places` decimals (0.70), more when the stored value has them (0.735)
+    const exact = String(Number(numeric.toFixed(6)));
+    const decimals = exact.includes(".") ? exact.split(".")[1].length : 0;
+    return numeric.toFixed(Math.max(places, Math.min(decimals, 6)));
+  }
   const text = String(value);
   const unit = getSettingDisplayUnit(p?.name);
   return unit ? `${text}${unit}` : text;
@@ -888,8 +911,14 @@ function getSettingUnitValue(name) {
   return UNIT_CYCLE[getSettingUnitIndex(name)] || UNIT_CYCLE[0] || 1;
 }
 
-function setSettingUnitButtonLabel(button, name) {
-  if (button) button.textContent = "x" + getSettingUnitValue(name);
+function getSettingStepValue(name, p) {
+  const decimalUnit = getSettingDecimalUnit(p);
+  const multiplier = getSettingUnitValue(name);
+  return decimalUnit ? Number((decimalUnit * multiplier).toFixed(6)) : multiplier;
+}
+
+function setSettingUnitButtonLabel(button, name, p) {
+  if (button) button.textContent = "x" + getSettingStepValue(name, p);
 }
 
 function cycleSettingUnitValue(name) {
@@ -2755,7 +2784,7 @@ async function renderItems(group, options = {}) {
       unitBtn = document.createElement("button");
       unitBtn.type = "button";
       unitBtn.className = "setting-unit-cycle";
-      setSettingUnitButtonLabel(unitBtn, name);
+      setSettingUnitButtonLabel(unitBtn, name, p);
 
       ctrl.appendChild(btnMinus);
       ctrl.appendChild(val);
@@ -2785,7 +2814,7 @@ async function renderItems(group, options = {}) {
       unitBtn = document.createElement("button");
       unitBtn.type = "button";
       unitBtn.className = "setting-unit-cycle";
-      setSettingUnitButtonLabel(unitBtn, name);
+      setSettingUnitButtonLabel(unitBtn, name, p);
 
       ctrl.appendChild(sliderWrap);
       ctrl.appendChild(btnMinus);
@@ -2821,6 +2850,11 @@ async function renderItems(group, options = {}) {
 
       const min = Number(p.min);
       const max = Number(p.max);
+      if (getSettingDecimalUnit(p)) {
+        // a decimal ratio: out of range is a mistake (70 meant as 70%), not something to clamp to the nearest end
+        if (num < min || num > max) return null;
+        return Number(num.toFixed(6));
+      }
       let next = clamp(num, min, max);
       if (Number.isInteger(min) && Number.isInteger(max)) {
         next = Math.round(next);
@@ -2857,12 +2891,13 @@ async function renderItems(group, options = {}) {
     }
 
     async function applyDelta(sign) {
-      const step = getSettingUnitValue(name);
+      const step = getSettingStepValue(name, p);
       let curv = Number(val.dataset.rawValue);
       if (Number.isNaN(curv)) curv = Number(p.default);
 
       let next = curv + sign * step;
       next = clamp(next, Number(p.min), Number(p.max));
+      if (getSettingDecimalUnit(p)) next = Number(next.toFixed(6));   // 0.7 + 0.01 is 0.71, not 0.7099999
 
       if (Number.isInteger(Number(p.min)) && Number.isInteger(Number(p.max)) && Number.isInteger(step)) {
         next = Math.round(next);
@@ -3021,7 +3056,7 @@ async function renderItems(group, options = {}) {
       unitBtn.onclick = (event) => {
         event.stopPropagation();
         cycleSettingUnitValue(name);
-        setSettingUnitButtonLabel(unitBtn, name);
+        setSettingUnitButtonLabel(unitBtn, name, p);
       };
     }
 

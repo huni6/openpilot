@@ -17,6 +17,31 @@ MAX_LATERAL_JERK = 5.0  # m/s^3
 MAX_LATERAL_ACCEL_NO_ROLL = 3.0  # m/s^2
 MAX_LATERAL_ACCEL_NO_ROLL_LOW_SPEED = 4.5  # m/s^2
 
+# Lateral limits from Carrot Web, as aabc88/openpilot ej (1b670d9b) has them: LatAccelMaxLow (up to 80 km/h),
+# LatAccelMaxHigh (from 120 km/h, linear in between) and LatJerkMax, in whole x0.1 steps. The defaults 45 / 30 / 50 are
+# the constants above; anything but an integer in range (as Params.get returns it) keeps them.
+LAT_ACCEL_LIMIT_SETTING_RANGE = (20, 60)   # x0.1 m/s^2
+LAT_JERK_LIMIT_SETTING_RANGE = (20, 100)   # x0.1 m/s^3
+LAT_ACCEL_RAMP_SPEEDS = (80 / 3.6, 120 / 3.6)
+
+
+def _tenths_setting(setting, setting_range, fallback: float) -> float:
+  if isinstance(setting, bool) or not isinstance(setting, int) or not setting_range[0] <= setting <= setting_range[1]:
+    return fallback
+  return setting / 10.0
+
+
+def lateral_accel_limits(low_setting, high_setting) -> tuple[float, float]:
+  """(low-speed, high-speed) lateral acceleration limits in m/s^2 from LatAccelMaxLow / LatAccelMaxHigh."""
+  return (_tenths_setting(low_setting, LAT_ACCEL_LIMIT_SETTING_RANGE, MAX_LATERAL_ACCEL_NO_ROLL_LOW_SPEED),
+          _tenths_setting(high_setting, LAT_ACCEL_LIMIT_SETTING_RANGE, MAX_LATERAL_ACCEL_NO_ROLL))
+
+
+def lateral_jerk_limit(setting) -> float:
+  """LatJerkMax: how fast the requested curvature may change, in m/s^3."""
+  return _tenths_setting(setting, LAT_JERK_LIMIT_SETTING_RANGE, MAX_LATERAL_JERK)
+
+
 def apply_deadzone(error, deadzone):
   if error > deadzone:
     error -= deadzone
@@ -75,18 +100,19 @@ def smooth_value(val, prev_val, tau, dt=DT_MDL):
   alpha = 1 - np.exp(-dt/tau) if tau > 0 else 1
   return alpha * val + (1 - alpha) * prev_val
 
-def clip_curvature(v_ego, prev_curvature, new_curvature, roll):
-  # This function respects ISO lateral jerk and acceleration limits + a max curvature
+def clip_curvature(v_ego, prev_curvature, new_curvature, roll, max_lat_accel_low=MAX_LATERAL_ACCEL_NO_ROLL_LOW_SPEED,
+                   max_lat_accel_high=MAX_LATERAL_ACCEL_NO_ROLL, max_lat_jerk=MAX_LATERAL_JERK):
+  # This function respects ISO lateral jerk and acceleration limits + a max curvature.
+  # The limits are LatAccelMaxLow / LatAccelMaxHigh / LatJerkMax (ej); like ej (and carrot-wip) the lateral acceleration
+  # limit goes linearly from the low-speed one at 80 km/h to the high-speed one at 120 km/h, not in a step at 100 km/h.
   v_ego = max(v_ego, MIN_SPEED)
-  max_curvature_rate = MAX_LATERAL_JERK / (v_ego ** 2)  # inexact calculation, check https://github.com/commaai/openpilot/pull/24755
+  max_curvature_rate = max_lat_jerk / (v_ego ** 2)  # inexact calculation, check https://github.com/commaai/openpilot/pull/24755
   new_curvature = np.clip(new_curvature,
                           prev_curvature - max_curvature_rate * DT_CTRL,
                           prev_curvature + max_curvature_rate * DT_CTRL)
 
   roll_compensation = roll * ACCELERATION_DUE_TO_GRAVITY
-  max_lateral_accel_no_roll = MAX_LATERAL_ACCEL_NO_ROLL
-  if v_ego < 100 / 3.6:  # 100 km/h
-    max_lateral_accel_no_roll = MAX_LATERAL_ACCEL_NO_ROLL_LOW_SPEED
+  max_lateral_accel_no_roll = float(np.interp(v_ego, LAT_ACCEL_RAMP_SPEEDS, [max_lat_accel_low, max_lat_accel_high]))
   max_lat_accel = max_lateral_accel_no_roll + roll_compensation
   min_lat_accel = -max_lateral_accel_no_roll + roll_compensation
   new_curvature, limited_accel = clamp(new_curvature, min_lat_accel / v_ego ** 2, max_lat_accel / v_ego ** 2)

@@ -1152,6 +1152,15 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
   EventName.torqueNNLoad: {
     ET.PERMANENT: torque_nn_load_alert,
   },
+  # the minimum-distance clamp's laneless correction pushing the car off a line (controlsState.clampSteerActive): a
+  # short ding once when it starts (soundd plays a sound when the alert's sound changes), shown while it lasts
+  EventName.clampSteerActive: {
+    ET.PERMANENT: Alert(
+      "클램프 조향 보정 작동",
+      "",
+      AlertStatus.normal, AlertSize.small,
+      Priority.LOWEST, VisualAlert.none, AudibleAlert.prompt, 0.2),
+  },
 
 }
 if HARDWARE.get_device_type() == 'mici':

@@ -38,6 +38,12 @@ if HAS_PARAMS:
     ParamKeyType = None
 
 
+try:
+  from openpilot.common.vehicle_dynamics import RATIO_KEY, center_ratio_to_store, stored_center_ratio
+except Exception:
+  RATIO_KEY, center_ratio_to_store, stored_center_ratio = "VehicleCenterToFrontRatio", None, None
+
+
 # In-memory fallback store when Params is unavailable
 _mem_store: Dict[str, str] = {}
 
@@ -103,7 +109,22 @@ def clamp_numeric(value: float, p: Optional[Dict[str, Any]]) -> float:
   return value
 
 
+def _read_center_ratio(params: "Params", default: Any) -> Any:
+  """VehicleCenterToFrontRatio as the web shows it: the custom ratio, or the installed vehicle's (stored 0 follows it)."""
+  from .settings import current_center_ratio_default
+  try:
+    ratio = stored_center_ratio(params.get(RATIO_KEY)) if stored_center_ratio is not None else None
+  except Exception:
+    ratio = None
+  if ratio is not None:
+    return ratio
+  vehicle = current_center_ratio_default(params)
+  return vehicle if vehicle is not None else default
+
+
 def _read_param_value(params: "Params", name: str, default: Any) -> Any:
+  if name == RATIO_KEY:
+    return _read_center_ratio(params, default)
   try:
     t = params.get_type(name)
 
@@ -224,6 +245,10 @@ def put_typed(params: "Params", key: str, value: Any) -> None:
 
 
 def set_param_value(name: str, value: Any) -> None:
+  if name == RATIO_KEY and center_ratio_to_store is not None:
+    # a decimal 0.10-0.90 or ValueError; the vehicle's own ratio is stored as 0 (follow the vehicle)
+    from .settings import current_center_ratio_default
+    value = center_ratio_to_store(value, current_center_ratio_default() if HAS_PARAMS else None)
   if not HAS_PARAMS:
     _mem_store[name] = str(value)
     return

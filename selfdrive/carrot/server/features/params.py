@@ -7,6 +7,7 @@ from aiohttp import web
 from ..config import PARAMS_BACKUP_PATH
 from ..services.params import (
   HAS_PARAMS,
+  RATIO_KEY,
   ParamKeyType,
   build_params_qr_payload,
   clamp_numeric,
@@ -73,9 +74,11 @@ async def api_param_set(request: web.Request) -> web.Response:
   except Exception:
     pass
 
-  # If value numeric -> clamp
+  # If value numeric -> clamp (not the centre-of-gravity ratio: 70 meant as 70% must not become 0.90; it is validated)
   try:
-    if p is not None and isinstance(p.get("min"), (int, float)) and isinstance(p.get("max"), (int, float)):
+    if name == RATIO_KEY:
+      pass
+    elif p is not None and isinstance(p.get("min"), (int, float)) and isinstance(p.get("max"), (int, float)):
       fv = float(value)
       fv = clamp_numeric(fv, p)
       # keep int if setting looks int-ish
@@ -89,6 +92,10 @@ async def api_param_set(request: web.Request) -> web.Response:
   try:
     set_param_value(name, value)
     return web.json_response({"ok": True, "name": name, "value": value, "has_params": HAS_PARAMS})
+  except ValueError as e:
+    if name != RATIO_KEY:
+      return web.json_response({"ok": False, "error": str(e)}, status=500)
+    return web.json_response({"ok": False, "error": str(e)}, status=400)
   except Exception as e:
     return web.json_response({"ok": False, "error": str(e)}, status=500)
 

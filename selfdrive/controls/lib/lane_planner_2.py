@@ -1,4 +1,5 @@
 import math
+import time
 import numpy as np
 from cereal import log
 from openpilot.common.filter_simple import FirstOrderFilter
@@ -6,6 +7,7 @@ from openpilot.common.realtime import DT_MDL
 # from openpilot.common.swaglog import cloudlog
 # from openpilot.common.logger import sLogger
 from openpilot.common.params import Params
+from openpilot.selfdrive.controls.lib import min_distance_clamp as mdc
 
 TRAJECTORY_SIZE = 33
 # positive numbers go right
@@ -69,6 +71,17 @@ class LanePlanner:
     self.lane_width_right_filtered = FirstOrderFilter(1.0, 1.0, DT_MDL)
     self.lane_offset_filtered = FirstOrderFilter(0.0, 2.0, DT_MDL)
 
+    # minimum-distance clamp (min_distance_clamp.py): settings come from the lateral planner with its other settings
+    self.clamp_settings = mdc.ClampSettings()
+    self.clamp_lines = mdc.LineHysteresis()
+    self.l_prob = self.r_prob = 0.
+    self.edge_x = np.zeros((TRAJECTORY_SIZE,))
+    self.le_std = self.re_std = float('inf')
+    self.edges_valid = False
+    self.clamp_max_correction = 0.0
+    self.clamp_sides = ""
+    self.clamp_holdoff_until = 0.0
+
     self.lanefull_mode = False
     self.d_prob_count = 0
 
@@ -91,11 +104,15 @@ class LanePlanner:
       self.rll_std = md.laneLineStds[2]
 
     if len(edges[0].t) == TRAJECTORY_SIZE:
-      self.le_y = np.array(edges[0].y) + md.roadEdgeStds[0] * 0.4
-      self.re_y = np.array(edges[1].y) - md.roadEdgeStds[1] * 0.4
+      self.le_y = np.array(edges[0].y) + md.roadEdgeStds[0] * mdc.EDGE_STD_MARGIN
+      self.re_y = np.array(edges[1].y) - md.roadEdgeStds[1] * mdc.EDGE_STD_MARGIN
+      self.edge_x = np.array(edges[0].x)
+      self.le_std, self.re_std = float(md.roadEdgeStds[0]), float(md.roadEdgeStds[1])
+      self.edges_valid = True
     else:
       self.le_y = self.lll_y
       self.re_y = self.rll_y
+      self.edges_valid = False
 
     desire_state = md.meta.desireState
     if len(desire_state):
@@ -251,6 +268,42 @@ class LanePlanner:
     self.offset_total = self.lane_offset_filtered.x
 
     return path_xyz, laneline_active
+
+  def apply_min_distance_clamp(self, path_xyz, v_ego, lane_changing=False, now=None):
+    """Keep the final path (PathOffset included) a minimum distance from the lane lines, or from the road edge where no
+    line is seen (min_distance_clamp.py). It only moves the path where it breaks the bound, by as much; faded in from 5
+    to 10 km/h and halfway between the bounds when the lane is too narrow for both. Off during a lane change (the
+    planner's multiplier, the model's lane change state or a turn signal: lane_changing) and LANE_CHANGE_HOLDOFF_S after
+    it, as the laneless correction. Ported as WIP-FR has it."""
+    self.clamp_max_correction = 0.0
+    self.clamp_sides = ""
+    settings = self.clamp_settings
+    now = time.monotonic() if now is None else now
+    if lane_changing or self.lane_change_multiplier < 0.5:
+      self.clamp_holdoff_until = now + mdc.LANE_CHANGE_HOLDOFF_S
+    if not settings.enabled or now < self.clamp_holdoff_until:
+      self.clamp_lines.reset()
+      return path_xyz
+    strength = mdc.fade_in(v_ego)
+    if strength <= 0.0:
+      return path_xyz
+    left_on, right_on = self.clamp_lines.update(self.l_prob, self.r_prob)
+    path_x = path_xyz[:, 0]
+    edges = self.edges_valid
+    lo, hi = mdc.bounds(np.interp(path_x, self.ll_x, self.lll_y), np.interp(path_x, self.ll_x, self.rll_y),
+                        np.interp(path_x, self.edge_x, self.le_y) if edges else 0.0,
+                        np.interp(path_x, self.edge_x, self.re_y) if edges else 0.0,
+                        left_on, right_on, self.le_std if edges else math.inf, self.re_std if edges else math.inf,
+                        settings)
+    lo = np.where(np.isfinite(lo), lo, -np.inf) * np.ones_like(path_x)   # NaN from the model: no bound on that side
+    hi = np.where(np.isfinite(hi), hi, np.inf) * np.ones_like(path_x)
+    if not np.isfinite(lo).any() and not np.isfinite(hi).any():
+      return path_xyz
+    correction = mdc.clamp_target(path_xyz[:, 1], lo, hi) - path_xyz[:, 1]
+    self.clamp_max_correction = float(np.max(np.abs(correction))) * strength
+    self.clamp_sides = ("L" if np.any(correction > 0.005) else "") + ("R" if np.any(correction < -0.005) else "")
+    path_xyz[:, 1] = path_xyz[:, 1] + strength * correction
+    return path_xyz
 
   def calculate_plan_yaw_and_yaw_rate(self, path_xyz):
     if path_xyz.shape[0] < 3:

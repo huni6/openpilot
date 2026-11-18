@@ -9,13 +9,18 @@ from openpilot.common.constants import CV
 from openpilot.common.params import Params
 from openpilot.common.realtime import config_realtime_process, Priority, Ratekeeper
 from openpilot.common.swaglog import cloudlog
+from openpilot.common.vehicle_dynamics import read_live_vehicle_dynamics
 import numpy as np
 from collections import deque
 
 from opendbc.car.car_helpers import interfaces
 from opendbc.car.vehicle_model import VehicleModel
 
-from openpilot.selfdrive.controls.lib.drive_helpers import clip_curvature, get_lag_adjusted_curvature
+from openpilot.selfdrive.controls.lib.drive_helpers import clip_curvature, get_lag_adjusted_curvature, lateral_accel_limits, \
+                                                       lateral_jerk_limit, MAX_LATERAL_ACCEL_NO_ROLL, \
+                                                       MAX_LATERAL_ACCEL_NO_ROLL_LOW_SPEED, MAX_LATERAL_JERK
+from openpilot.selfdrive.controls.lib.min_distance_clamp import ClampSettings, ClampSteerCorrector, read_clamp_settings
+from openpilot.selfdrive.controls.lib.lane_mode_switch import CurveLaneless, read_lane_mode_settings
 from openpilot.selfdrive.controls.lib.latcontrol import LatControl, MIN_LATERAL_CONTROL_SPEED
 from openpilot.selfdrive.controls.lib.latcontrol_pid import LatControlPID
 from openpilot.selfdrive.controls.lib.latcontrol_angle import LatControlAngle, STEER_ANGLE_SATURATION_THRESHOLD
@@ -34,6 +39,8 @@ from openpilot.selfdrive.carrot.carrot_controls import CarrotControls
 State = log.SelfdriveState.OpenpilotState
 LaneChangeState = log.LaneChangeState
 LaneChangeDirection = log.LaneChangeDirection
+Desire = log.Desire
+LAT_ACCEL_LIMIT_RATE = 0.5  # m/s^2 per second: lowering LatAccelMaxLow from 4.5 to 3.0 takes 3 s, also in a curve
 
 ACTUATOR_FIELDS = tuple(car.CarControl.Actuators.schema.fields.keys())
 
@@ -77,9 +84,55 @@ class Controls:
     elif self.CP.lateralTuning.which() == 'torque':
       self.LaC = LatControlTorque(self.CP, self.CI)
     self.carrot_controls = CarrotControls(self.CP)
+    # ej lateral limits (LatAccelMaxLow / LatAccelMaxHigh / LatJerkMax), the minimum-distance clamp's laneless half
+    # (min_distance_clamp.py) and laneless in sharp curves (lane_mode_switch.py): settings read at 1 Hz in update()
+    self.lat_accel_low_target, self.lat_accel_high_target = self.read_lat_accel_limits()
+    self.lat_accel_low, self.lat_accel_high = self.lat_accel_low_target, self.lat_accel_high_target
+    self.lat_jerk_limit = self.read_lat_jerk_limit()
+    self.clamp_steer = ClampSteerCorrector()
+    self.clamp_steer_ran = False
+    self.clamp_settings = self.read_clamp_settings()
+    self.curve_laneless = CurveLaneless()
+    self.laneless_curvature = self.read_laneless_curvature()
+    self.lanefull_mode_enabled = False
+
+  def read_lat_accel_limits(self) -> tuple[float, float]:
+    # Params.get casts in Python (a corrupt value becomes None); get_int's native std::stoi would abort on one
+    try:
+      return lateral_accel_limits(self.params.get("LatAccelMaxLow", return_default=True),
+                                  self.params.get("LatAccelMaxHigh", return_default=True))
+    except Exception:  # e.g. the native params registry is not rebuilt yet: keep the stock limits
+      return MAX_LATERAL_ACCEL_NO_ROLL_LOW_SPEED, MAX_LATERAL_ACCEL_NO_ROLL
+
+  def read_lat_jerk_limit(self) -> float:
+    try:
+      return lateral_jerk_limit(self.params.get("LatJerkMax", return_default=True))
+    except Exception:
+      return MAX_LATERAL_JERK
+
+  def read_clamp_settings(self):
+    try:
+      return read_clamp_settings(self.params)
+    except Exception:
+      return ClampSettings()
+
+  def read_laneless_curvature(self) -> float:
+    try:
+      return read_lane_mode_settings(self.params)[1]
+    except Exception:
+      return 0.0
 
   def update(self):
     self.sm.update(15)
+    if self.sm.frame % 100 == 0:  # 1 Hz: these settings can change while driving (never read per 10 ms cycle)
+      self.lat_accel_low_target, self.lat_accel_high_target = self.read_lat_accel_limits()
+      self.lat_jerk_limit = self.read_lat_jerk_limit()
+      self.clamp_settings = self.read_clamp_settings()
+      self.laneless_curvature = self.read_laneless_curvature()
+    # a changed limit moves gradually, so lowering it in a curve does not cut the request at once
+    step = LAT_ACCEL_LIMIT_RATE * DT_CTRL
+    self.lat_accel_low += float(np.clip(self.lat_accel_low_target - self.lat_accel_low, -step, step))
+    self.lat_accel_high += float(np.clip(self.lat_accel_high_target - self.lat_accel_high, -step, step))
     if self.sm.updated["liveCalibration"]:
       self.pose_calibrator.feed_live_calib(self.sm['liveCalibration'])
     if self.sm.updated["livePose"]:
@@ -89,7 +142,10 @@ class Controls:
   def state_control(self):
     CS = self.sm['carState']
 
-    # Update VehicleModel
+    # Update VehicleModel (VehicleCenterToFrontRatio arrives as paramsd's applied snapshot; none keeps the last one)
+    dynamics = read_live_vehicle_dynamics(self.sm, self.CP)
+    if dynamics is not None:
+      self.VM.update_dynamics(dynamics)
     lp = self.sm['liveParameters']
     x = max(lp.stiffnessFactor, 0.1)
     sr = max(lp.steerRatio, 0.1) * self.params.get_float("SteerRatioRate") / 100.0
@@ -150,7 +206,10 @@ class Controls:
     # Steering PID loop and lateral MPC
     lat_plan = self.sm['lateralPlan']
     curve_speed_abs = abs(self.sm['carrotMan'].vTurnSpeed)
-    self.lanefull_mode_enabled = (lat_plan.useLaneLines and curve_speed_abs > self.params.get_int("UseLaneLineCurveSpeed"))
+    # LanelessCurvature: laneless in a curve at least this sharp (lane_mode_switch.py), like UseLaneLineCurveSpeed
+    curve_laneless = self.curve_laneless.update(self.laneless_curvature, model_v2, time.monotonic())
+    self.lanefull_mode_enabled = (lat_plan.useLaneLines and curve_speed_abs > self.params.get_int("UseLaneLineCurveSpeed")
+                                  and not curve_laneless)
     lat_smooth_seconds = self.params.get_float("LatSmoothSec") * 0.01
     steer_actuator_delay = self.params.get_float("SteerActuatorDelay") * 0.01
     if steer_actuator_delay == 0.0:
@@ -160,6 +219,11 @@ class Controls:
       alpha = 1 - np.exp(-DT_CTRL / tau) if tau > 0 else 1
       return alpha * val + (1 - alpha) * prev_val
 
+    self.clamp_steer_ran = False   # set by the laneless branch below
+    # a lane change (from the model, or the turn signals, which start before the model's desire and end after it)
+    # stops the minimum-distance clamp; tracked every cycle so its hold-off also covers one made outside laneless
+    clamp_lane_changing = model_v2.meta.desire != Desire.none or model_v2.meta.laneChangeState != LaneChangeState.off or \
+                          CS.leftBlinker or CS.rightBlinker
     if not CC.latActive:
       new_desired_curvature = self.curvature
     elif self.lanefull_mode_enabled:
@@ -168,10 +232,21 @@ class Controls:
       else:
         curvature = get_lag_adjusted_curvature(self.CP, CS.vEgo, lat_plan.psis, lat_plan.curvatures, steer_actuator_delay + lat_smooth_seconds, lat_plan.distances)
         new_desired_curvature = smooth_value(curvature, self.desired_curvature, lat_smooth_seconds)
-    else:      
-      new_desired_curvature = smooth_value(model_v2.action.desiredCurvature, self.desired_curvature, 0.1)
+    else:
+      # The minimum-distance clamp adds its correction to the model's curvature: zero unless the model's plan comes
+      # too close to a line or the road edge (min_distance_clamp.py), and only from a valid, current model message.
+      model_ok = self.sm.valid['modelV2'] and self.sm.alive['modelV2']
+      clamp_kappa = self.clamp_steer.update(model_v2, CS.vEgo, clamp_lane_changing, self.clamp_settings, usable=model_ok)
+      self.clamp_steer_ran = True
+      new_desired_curvature = smooth_value(model_v2.action.desiredCurvature + clamp_kappa, self.desired_curvature, 0.1)
+    if not self.clamp_steer_ran:
+      # not steering laneless: no correction, but the lane change hold-off and the alert's end keep their history
+      self.clamp_steer.update(model_v2, CS.vEgo, clamp_lane_changing, self.clamp_settings, usable=False)
 
-    self.desired_curvature, curvature_limited = clip_curvature(CS.vEgo, self.desired_curvature, new_desired_curvature, lp.roll)
+    self.desired_curvature, curvature_limited = clip_curvature(CS.vEgo, self.desired_curvature, new_desired_curvature, lp.roll,
+                                                               max_lat_accel_low=self.lat_accel_low,
+                                                               max_lat_accel_high=self.lat_accel_high,
+                                                               max_lat_jerk=self.lat_jerk_limit)
 
     actuators.curvature = float(self.desired_curvature)
     steer, steeringAngleDeg, lac_log = self.LaC.update(CC.latActive, CS, self.VM, lp,
@@ -318,6 +393,8 @@ class Controls:
       cs.lateralControlState.torqueState = lac_log
 
     cs.activeLaneLine = self.lanefull_mode_enabled
+    # the clamp's ding: only while its laneless correction ran this cycle and steering is active (no stale True)
+    cs.clampSteerActive = bool(self.clamp_steer_ran and self.clamp_steer.alert_active and CC.latActive)
     self.pm.send('controlsState', dat)
 
     # carControl

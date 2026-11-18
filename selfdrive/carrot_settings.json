@@ -153,7 +153,42 @@
                 "LatMpcInputOffset",
                 "UseLaneLineSpeed",
                 "UseLaneLineCurveSpeed",
+                "LanelessCurvature",
+                "LaneModeWithLead",
                 "AdjustLaneOffset"
+              ]
+            },
+            {
+              "id": "STEER_CLAMP",
+              "ko": "최소거리 클램프",
+              "en": "Min-Distance Clamp",
+              "zh": "最小距离钳制",
+              "params": [
+                "ClampEnable",
+                "ClampMinDistLane",
+                "ClampMinDistEdge",
+                "ClampSteerGain",
+                "ClampSteerAlert"
+              ]
+            },
+            {
+              "id": "STEER_LAT_LIMIT",
+              "ko": "횡가속·저크 한도",
+              "en": "Lateral Limits",
+              "zh": "横向限制",
+              "params": [
+                "LatAccelMaxLow",
+                "LatAccelMaxHigh",
+                "LatJerkMax"
+              ]
+            },
+            {
+              "id": "STEER_VEHICLE_SPECS",
+              "ko": "차량 제원",
+              "en": "Vehicle Specifications",
+              "zh": "车辆参数",
+              "params": [
+                "VehicleCenterToFrontRatio"
               ]
             },
             {
@@ -595,6 +630,86 @@
     },
     {
       "group": "조향일반",
+      "name": "ClampEnable",
+      "title": "최소거리 클램프 사용(켜짐)",
+      "descr": "차가 차선(그쪽 차선이 안 보이면 도로경계)에 너무 붙지 않도록 최소 거리를 지킵니다. 레인모드에서는 따라가는 경로를, 레인리스에서는 모델 조향에 작은 보정을 더해 지킵니다. 평소에는 아무것도 바꾸지 않고, 선에 가까워질 때만 넘은 만큼 밀어냅니다. 차선변경 중과 끝난 뒤 2초, 깜빡이를 켠 동안은 쉽니다. 저장하면 재시작 없이 약 1초 안에 적용됩니다.",
+      "egroup": "LAT",
+      "etitle": "Min-Distance Clamp (on)",
+      "edescr": "Keeps the car a minimum distance from the lane lines (or the road edge where no line is seen). In lane mode it bounds the path it follows; in laneless it adds a small correction to the model's steering. It changes nothing normally and only pushes back by the violation when the car gets too close. It rests during a lane change, for 2 s after it and while a turn signal is on. Applies within about 1 s, no restart.",
+      "cgroup": "转向",
+      "ctitle": "最小距离钳制（开）",
+      "cdescr": "使车辆与车道线（看不到车道线时为路缘）保持最小距离。车道线模式下限制所跟随的路径，无车道线模式下在模型转向上加一个小修正。平时不做任何改变，只有过于靠近时按越界量推回。变道时、变道后2秒及打转向灯时暂停。保存后约1秒内生效，无需重启。",
+      "min": 0,
+      "max": 1,
+      "default": 1,
+      "unit": 1
+    },
+    {
+      "group": "조향일반",
+      "name": "ClampMinDistLane",
+      "title": "클램프 차선 최소거리(135)cm",
+      "descr": "차 중심이 감지된 차선에서 이 거리 안쪽으로 들어가지 않습니다(차폭 2m면 옆면과 선 사이 약 35cm). 클수록 선에서 멀리 달립니다. 차로가 양쪽 최소거리 합보다 좁으면 차로 가운데로 갑니다.",
+      "egroup": "LAT",
+      "etitle": "Clamp Lane-Line Distance (135)cm",
+      "edescr": "The car's centre never comes closer than this to a detected lane line (about 35 cm between the side and the line for a 2 m wide car). Larger keeps further away. If the lane is narrower than both distances together, it goes to the lane centre.",
+      "cgroup": "转向",
+      "ctitle": "钳制距车道线最小距离(135)cm",
+      "cdescr": "车辆中心与检测到的车道线保持至少该距离（车宽2米时车身侧面与线约35厘米）。越大离线越远。车道宽度小于两侧距离之和时走车道中央。",
+      "min": 60,
+      "max": 200,
+      "default": 135,
+      "unit": 5
+    },
+    {
+      "group": "조향일반",
+      "name": "ClampMinDistEdge",
+      "title": "클램프 도로경계 최소거리(115)cm",
+      "descr": "그쪽 차선이 안 보일 때 도로경계(연석)에서 차 중심까지 지키는 최소 거리입니다. 모델이 경계 위치를 충분히 확신할 때만 씁니다.",
+      "egroup": "LAT",
+      "etitle": "Clamp Road-Edge Distance (115)cm",
+      "edescr": "Minimum distance from the road edge (curb) to the car's centre on a side where no lane line is seen. Used only when the model is sure enough of the edge.",
+      "cgroup": "转向",
+      "ctitle": "钳制距路缘最小距离(115)cm",
+      "cdescr": "该侧看不到车道线时，路缘到车辆中心保持的最小距离。仅在模型对路缘位置足够确定时使用。",
+      "min": 40,
+      "max": 180,
+      "default": 115,
+      "unit": 5
+    },
+    {
+      "group": "조향일반",
+      "name": "ClampSteerGain",
+      "title": "클램프 레인리스 보정 게인x0.1(10)",
+      "descr": "레인리스에서 선에 가까워졌을 때 조향을 얼마나 세게 밀어낼지 정합니다. 10 = 1.0배, 0이면 레인리스 보정을 끕니다(레인모드 경로 클램프는 그대로). 보정은 횡가속 1.5m/s²를 넘지 않습니다. 너무 높이면 출렁일 수 있습니다.",
+      "egroup": "LAT",
+      "etitle": "Clamp Laneless Gain x0.1 (10)",
+      "edescr": "How hard laneless steering pushes away from a line it gets too close to. 10 = 1.0x, 0 turns the laneless correction off (the lane-mode path clamp stays). The correction never adds more than 1.5 m/s² of lateral acceleration. Too high may oscillate.",
+      "cgroup": "转向",
+      "ctitle": "钳制无车道线修正增益x0.1(10)",
+      "cdescr": "无车道线模式下靠近车道线时转向推开的力度。10 = 1.0倍，0 关闭无车道线修正（车道线模式路径钳制保留）。修正产生的横向加速度不超过1.5m/s²。过高可能摆动。",
+      "min": 0,
+      "max": 20,
+      "default": 10,
+      "unit": 1
+    },
+    {
+      "group": "조향일반",
+      "name": "ClampSteerAlert",
+      "title": "클램프 보정 알림(켜짐)",
+      "descr": "레인리스 보정이 걸리면 화면에 '클램프 조향 보정 작동'을 띄우고 띵 소리를 냅니다. 끝난 뒤 5초 동안은 다시 울리지 않습니다. 끄면 보정은 그대로 하고 알림만 없앱니다.",
+      "egroup": "LAT",
+      "etitle": "Clamp Correction Alert (on)",
+      "edescr": "Shows a small message and dings when the laneless correction kicks in; quiet for 5 s after one ends. Off silences the alert only; the correction still works.",
+      "cgroup": "转向",
+      "ctitle": "钳制修正提醒（开）",
+      "cdescr": "无车道线修正启动时显示提示并发出提示音；结束后5秒内不再响。关闭只静音提醒，修正照常工作。",
+      "min": 0,
+      "max": 1,
+      "default": 1,
+      "unit": 1
+    },
+    {
+      "group": "조향일반",
       "name": "CameraYawTrimDeg",
       "title": "카메라YAW보정*0.01deg(0)",
       "descr": "카메라 좌우(YAW) 값을 미세조정(+: 오른쪽)",
@@ -1027,6 +1142,54 @@
     },
     {
       "group": "조향튜닝",
+      "name": "LatAccelMaxLow",
+      "title": "저속 횡가속 한도x0.1(45)",
+      "descr": "80km/h 이하에서 허용하는 최대 횡가속도입니다(ej). 45 = 4.5m/s². 높이면 저속 커브에서 핸들이 더 돌아가지만, 핸들각 85°를 넘으면 EPS 보호로 조향이 끊길 수 있습니다. 80~120km/h는 저속·고속 한도 사이를 이어 줍니다(전에는 100km/h에서 4.5→3.0으로 한 번에 바뀜). 저장하면 약 1초 안에 읽고, 커브 중에 갑자기 깎이지 않도록 초당 0.5m/s²씩 서서히 바뀝니다.",
+      "egroup": "LAT",
+      "etitle": "Low-Speed Lateral Accel Limit x0.1 (45)",
+      "edescr": "Largest lateral acceleration allowed up to 80 km/h (ej). 45 = 4.5 m/s². Higher turns the wheel further in slow curves, but above about 85° of steering angle the EPS may cut steering to protect itself. Between 80 and 120 km/h the limit runs linearly from this to the high-speed limit (it used to switch from 4.5 to 3.0 at 100 km/h). Read within about 1 s and moved at 0.5 m/s² per second so it never cuts a curve short at once.",
+      "cgroup": "转向",
+      "ctitle": "低速横向加速度上限x0.1(45)",
+      "cdescr": "80km/h 以下允许的最大横向加速度（ej）。45 = 4.5m/s²。调高时低速弯道方向盘转得更多，但转角超过约85°时 EPS 可能为自我保护而中断转向。80~120km/h 之间在低速与高速上限之间线性过渡（以前在100km/h处由4.5直接变为3.0）。约1秒内读取，并以每秒0.5m/s²逐渐变化，弯道中不会突然削减。",
+      "min": 20,
+      "max": 60,
+      "default": 45,
+      "unit": 1
+    },
+    {
+      "group": "조향튜닝",
+      "name": "LatAccelMaxHigh",
+      "title": "고속 횡가속 한도x0.1(30)",
+      "descr": "120km/h 이상에서 허용하는 최대 횡가속도입니다(ej). 30 = 3.0m/s². 80~120km/h 구간은 저속·고속 한도 사이를 이어 줍니다. 높이면 고속 커브·램프에서 핸들이 더 돌아갑니다. 저장하면 약 1초 안에 읽고 초당 0.5m/s²씩 서서히 바뀝니다.",
+      "egroup": "LAT",
+      "etitle": "High-Speed Lateral Accel Limit x0.1 (30)",
+      "edescr": "Largest lateral acceleration allowed from 120 km/h (ej). 30 = 3.0 m/s². Between 80 and 120 km/h the limit runs linearly between the low- and high-speed limits. Higher turns the wheel further in fast curves and ramps. Read within about 1 s and moved at 0.5 m/s² per second.",
+      "cgroup": "转向",
+      "ctitle": "高速横向加速度上限x0.1(30)",
+      "cdescr": "120km/h 以上允许的最大横向加速度（ej）。30 = 3.0m/s²。80~120km/h 之间在低速与高速上限之间线性过渡。调高时高速弯道和匝道方向盘转得更多。约1秒内读取，并以每秒0.5m/s²逐渐变化。",
+      "min": 20,
+      "max": 60,
+      "default": 30,
+      "unit": 1
+    },
+    {
+      "group": "조향튜닝",
+      "name": "LatJerkMax",
+      "title": "횡저크 상한x0.1(50)",
+      "descr": "모델이 요청하는 조향(곡률)이 바뀌는 속도의 상한(m/s³)입니다. 50(5.0)이 기본 오픈파일럿 값입니다. 높이면 커브 진입 때 핸들이 더 빨리 돌지만 급해질 수 있고, 낮추면 부드럽지만 늦게 따라갑니다. 횡가속 한도와는 별개입니다. 저장하면 재시작 없이 약 1초 안에 적용됩니다.",
+      "egroup": "LAT",
+      "etitle": "Lateral Jerk Limit x0.1 (50)",
+      "edescr": "Upper limit (m/s³) on how fast the requested steering (curvature) may change. 50 (5.0) is stock openpilot. Higher turns the wheel faster into a curve but can feel abrupt; lower is smoother but follows later. Separate from the lateral acceleration limits. Applies within about 1 s, no restart.",
+      "cgroup": "转向",
+      "ctitle": "横向加加速度上限x0.1(50)",
+      "cdescr": "模型请求的转向（曲率）变化速度上限（m/s³）。50（5.0）为 openpilot 默认值。调高进弯时方向盘转得更快但可能突兀，调低更平顺但跟随更慢。与横向加速度上限无关。保存后约1秒内生效，无需重启。",
+      "min": 20,
+      "max": 100,
+      "default": 50,
+      "unit": 1
+    },
+    {
+      "group": "조향튜닝",
       "name": "SteerRatioRate",
       "title": "CustomSteerRatioRatex0.01(100)",
       "descr": "LiveSteerRatio 반영비율\n(CustomSR 0으로 설정해야 함)",
@@ -1040,6 +1203,24 @@
       "max": 200,
       "default": 0,
       "unit": 1
+    },
+    {
+      "group": "차량 제원",
+      "name": "VehicleCenterToFrontRatio",
+      "title": "무게중심 앞축 거리 비율",
+      "descr": "앞바퀴 축에서 무게중심까지 거리 ÷ 축간거리 비율을 소수로 입력합니다. 예: 0.50. 앞축 하중 비율이나 무게중심 높이가 아닙니다. 기본값은 설치된 차량의 비율이고, 그 값을 고르면 차량 값을 그대로 따릅니다. 차량을 아직 인식하지 못했으면 이 항목이 보이지 않습니다.\n주행 중에도 약 0.5초 안에 읽어 초당 최대 0.02씩 서서히 반영합니다(조향 계산 모델·학습기·레인모드 경로). 실측 근거 없이 조향감을 맞추는 용도로 바꾸지 마세요.",
+      "egroup": "Vehicle Specifications",
+      "etitle": "Front Axle to CG Ratio",
+      "edescr": "Front axle to center of gravity distance divided by wheelbase, entered as a decimal such as 0.50; not front axle load or CG height. The default is the installed vehicle's ratio, and choosing it follows the vehicle's value. Hidden until the vehicle is recognised. Read within about 0.5 s while driving and ramped at up to 0.02 per second (steering model, parameter learner, lane mode path). Use measured specifications, not steering-feel guesses.",
+      "cgroup": "车辆参数",
+      "ctitle": "前轴至重心距离比例",
+      "cdescr": "前轴至重心距离除以轴距，以0.50等小数输入，不是前轴载荷或重心高度。默认值为已安装车型的比例，选择该值即跟随车辆数值。尚未识别车辆时不显示此项。行驶中约0.5秒内读取，按每秒最多0.02逐步生效（转向计算模型、参数学习器、车道线模式路径）。请依据实测数据设置。",
+      "min": 0.1,
+      "max": 0.9,
+      "default": null,
+      "vehicle_default": true,
+      "unit": 0.01,
+      "display_decimals": 2
     },
     {
       "group": "가속설정",
@@ -2195,6 +2376,38 @@
     },
     {
       "group": "레인모드",
+      "name": "LanelessCurvature",
+      "title": "레인모드: 레인리스 전환 곡률x0.0001(0)",
+      "descr": "레인모드로 달리다가 이 곡률 이상인 커브에서는 레인리스(모델 조향)로 바꿉니다. 0은 끄기입니다. 값×0.0001이 곡률(1/m)이고 커브 반경은 10000÷값 m입니다. 예: 40 = 반경 250m보다 급한 커브, 100 = 반경 100m보다 급한 커브.\n모델이 지금 요청하는 곡률과 1초 앞까지의 계획 곡률 중 큰 값을 보고, 곡률이 설정값의 80% 아래로 1초 이어지면 레인모드로 돌아갑니다. '레인모드: 커브속도'와 같이 쓰면 둘 중 하나만 걸려도 레인리스입니다. 화면의 레인모드 표시도 같이 바뀝니다. 저장하면 재시작 없이 약 1초 안에 적용됩니다.",
+      "egroup": "LANE",
+      "etitle": "Laneline: Laneless Curvature x0.0001 (0)",
+      "edescr": "While in lane mode, curves at least this sharp are steered laneless (the model's own steering). 0 is off. The value x0.0001 is the curvature (1/m); the radius is 10000 / value metres. Example: 40 = curves tighter than 250 m radius, 100 = tighter than 100 m.\nIt uses the larger of the model's curvature now and its plan over the next second, and returns to lane mode after the curvature stays under 80% of the setting for a second. With 'Laneline: Curve Speed' either one switches to laneless. The onroad lane mode mark follows it. Applies within about 1 s, no restart.",
+      "cgroup": "转向",
+      "ctitle": "车道线: 无车道线切换曲率x0.0001(0)",
+      "cdescr": "车道线模式行驶时，曲率不低于该值的弯道改用无车道线（模型自身转向）。0 为关闭。数值×0.0001 为曲率（1/m），弯道半径为 10000÷数值 米。例如：40 = 半径小于250米的弯道，100 = 半径小于100米。\n取模型当前请求曲率与未来1秒计划曲率中的较大值；曲率低于设定值的80%并持续1秒后恢复车道线模式。与“车道线: 弯道速度”同时使用时任一条件满足即为无车道线。屏幕上的车道线模式标志也随之变化。保存后约1秒内生效，无需重启。",
+      "min": 0,
+      "max": 200,
+      "default": 0,
+      "unit": 5
+    },
+    {
+      "group": "레인모드",
+      "name": "LaneModeWithLead",
+      "title": "레인모드: 앞차 있으면 레인모드(꺼짐)",
+      "descr": "켜면 앞차(화면에 앞차 표시가 뜨는 레이더·비전 앞차)가 0.5초 이상 보이는 동안 레인모드를 씁니다. 앞차가 2초 동안 안 보이면 '레인모드: 속도' 조건으로 돌아갑니다. 속도 조건과 함께 쓰면 둘 중 하나만 맞아도 레인모드입니다(LFA 버튼으로 레인모드를 꺼 둔 경우도 앞차가 있으면 레인모드).\n차선이 1초 넘게 잘 보여야 실제로 레인모드가 걸리고, 모델이 크게 감속을 계획하는 동안과 '레인리스 전환 곡률' 이상의 커브에서는 레인리스입니다. 저장하면 재시작 없이 약 0.5초 안에 적용됩니다.",
+      "egroup": "LANE",
+      "etitle": "Laneline: Lane Mode With a Lead (off)",
+      "edescr": "When on, lane mode is used while a lead car (radar or vision, as the onroad lead mark shows it) has been seen for 0.5 s; after 2 s without one, the 'Laneline: Speed' rule applies again. With the speed rule either one turns lane mode on (also when lane mode was switched off with the LFA button).\nLane mode still needs the lane lines seen well for over a second, and steering stays laneless while the model plans a strong slowdown and in curves sharper than 'Laneless Curvature'. Applies within about 0.5 s, no restart.",
+      "cgroup": "转向",
+      "ctitle": "车道线: 有前车时使用车道线模式（关）",
+      "cdescr": "开启后，前车（雷达或视觉前车，即屏幕上显示的前车）出现0.5秒以上时使用车道线模式；前车消失2秒后恢复“车道线: 速度”条件。与速度条件同时使用时任一满足即为车道线模式（用LFA按钮关闭车道线模式时，有前车也会使用）。\n车道线需清晰可见1秒以上才会真正进入车道线模式；模型计划大幅减速时以及弯道曲率超过“无车道线切换曲率”时仍为无车道线。保存后约0.5秒内生效，无需重启。",
+      "min": 0,
+      "max": 1,
+      "default": 0,
+      "unit": 1
+    },
+    {
+      "group": "레인모드",
       "name": "AdjustLaneOffset",
       "title": "레인모드: 차선조절옵셋 (0)cm",
       "descr": "도로경계쪽/커브안쪽으로 보정합니다.",
@@ -2901,21 +3114,17 @@
       "group": "화면",
       "name": "NewUi",
       "title": "new ui",
-      "descr": "C4 온로드 화면을 고릅니다.\n0: 기존 당근 UI\n3: 로봇 얼굴. 주행 중 카메라·차선·속도 표시를 끄고, 빛나는 두 눈이 차 상태에 따라 표정을 바꿉니다(인게이지하면 핸들을 잡고 실제 조향 방향으로 돌림, 차선 변경, 사각지대, 급제동, 운전자 감시 경고, 안전벨트, 후진·주차 기어, 비상등, 설정속도 변경, 오래 정차). 빨간 위급 경고와 eGPU 상태 배지는 얼굴 위에 그대로 뜹니다.\n1·2는 WIP-FR의 다른 화면 번호라 이 브랜치에는 없습니다.\n재부팅 없이 적용되며 주행 제어·경고 판단·경고음은 바뀌지 않습니다. comma 3·3X 화면은 그대로입니다.",
+      "descr": "C4 온로드 화면을 고릅니다(WIP-FR과 같은 번호).\n0: 기존 당근 UI\n1: Wayon/sunnypilot 스타일. 카메라 위에 옅은 흰 차선, 앞차 아래 막대(레이더 초록·비전 파랑), 아래쪽 조향 토크 막대와 핸들 아이콘, 설정속도가 바뀌면 큰 숫자, 사각지대 BSM 아이콘. 당근 속도 패널·신호등 원·신뢰도 공은 그리지 않습니다.\n2: 시계. 카메라·차선·속도 패널을 끄고 아날로그 시계만 그립니다. 왼쪽에 조향 상태·속도, 오른쪽에 요일·날짜가 나오고, 해가 지면 빨간 야간 모드로 바뀌어 초침을 숨깁니다. 경고는 시계 위에 그대로 뜹니다.\n3: 로봇 얼굴. 주행 중 카메라·차선·속도 표시를 끄고, 빛나는 두 눈이 차 상태에 따라 표정을 바꿉니다(인게이지하면 핸들을 잡고 실제 조향 방향으로 돌림, 차선 변경, 사각지대, 급제동, 운전자 감시 경고, 안전벨트, 후진·주차 기어, 비상등, 설정속도 변경, 오래 정차). 빨간 위급 경고만 얼굴 위에 뜹니다.\n1~3에서도 eGPU 상태 배지가 뜹니다. WIP-FR의 감속 사유 배지, 정차·오토홀드 타이머, 비전 사각지대 카드는 이 브랜치에 없습니다.\n재부팅 없이 적용되며 주행 제어·경고 판단·경고음은 바뀌지 않습니다. comma 3·3X 화면은 그대로입니다.",
       "egroup": "DISPLAY",
       "etitle": "new ui",
-      "edescr": "Choose the C4 onroad display.\n0: Carrot UI\n3: Robot face. While driving, the camera, lanes and speed panel are turned off and two glowing eyes change expression with the car state (engaging grabs a steering wheel that turns with the real steering, lane changes, blind spot, hard braking, driver-monitoring alerts, seatbelt, reverse and park, hazard lights, set-speed changes, long stops). Red critical alerts and the eGPU status badge still appear over the face.\n1 and 2 are other WIP-FR displays and do not exist on this branch.\nApplies without rebooting; driving control, alert decisions and alert sounds are unchanged. The comma 3/3X display is unchanged.",
+      "edescr": "Choose the C4 onroad display (numbered as on WIP-FR).\n0: Carrot UI\n1: Wayon/sunnypilot style. Faint white lane lines over the camera, a bar under the lead car (radar green, vision blue), a steering torque bar and wheel icon at the bottom, a large set speed when it changes, and BSM icons. Carrot's speed panel, traffic light circle and confidence ball are not drawn.\n2: Clock. Camera, lanes and the speed panel are turned off and only an analog clock is shown, with steering state and speed on the left and weekday and date on the right. After sunset it switches to a red night mode without the second hand. Alerts still appear over the clock.\n3: Robot face. While driving, the camera, lanes and speed panel are turned off and two glowing eyes change expression with the car state (engaging grabs a steering wheel that turns with the real steering, lane changes, blind spot, hard braking, driver-monitoring alerts, seatbelt, reverse and park, hazard lights, set-speed changes, long stops). Only red critical alerts appear over the face.\nThe eGPU status badge shows on 1-3 too. WIP-FR's deceleration reason badge, stop/hold timers and vision blind-spot card do not exist on this branch.\nApplies without rebooting; driving control, alert decisions and alert sounds are unchanged. The comma 3/3X display is unchanged.",
       "cgroup": "显示",
       "ctitle": "new ui",
-      "cdescr": "选择 C4 行车界面。\n0：原界面\n3：机器人表情。行车时关闭摄像头、车道和速度面板，两只发光的眼睛随车辆状态变化表情（接管时握住方向盘并随实际转向转动、变道、盲区、急刹、驾驶员监控警告、安全带、倒车和驻车挡、双闪、设定速度变化、长时间停车）。红色紧急警告和 eGPU 状态标志仍显示在上方。\n1 和 2 是 WIP-FR 的其他界面，本分支没有。\n无需重启，不改变车辆控制、警告判断和警告音。comma 3/3X 界面不变。",
+      "cdescr": "选择 C4 行车界面（编号与 WIP-FR 相同）。\n0：原界面\n1：Wayon/sunnypilot 风格。摄像头画面上显示浅白色车道线、前车下方横条（雷达绿色、视觉蓝色）、底部转向扭矩条和方向盘图标、设定速度变化时显示大号数字及盲区 BSM 图标。不绘制原速度面板、红绿灯圆圈和置信度球。\n2：时钟。关闭摄像头、车道和速度面板，只显示模拟时钟；左侧为转向状态和车速，右侧为星期和日期；日落后切换为红色夜间模式并隐藏秒针。警告仍显示在时钟上方。\n3：机器人表情。行车时关闭摄像头、车道和速度面板，两只发光的眼睛随车辆状态变化表情（接管时握住方向盘并随实际转向转动、变道、盲区、急刹、驾驶员监控警告、安全带、倒车和驻车挡、双闪、设定速度变化、长时间停车）。只有红色紧急警告显示在上方。\n1~3 也显示 eGPU 状态标志。WIP-FR 的减速原因标志、停车/自动驻车计时和视觉盲区卡片本分支没有。\n无需重启，不改变车辆控制、警告判断和警告音。comma 3/3X 界面不变。",
       "min": 0,
       "max": 3,
       "default": 0,
-      "unit": 1,
-      "values": [
-        0,
-        3
-      ]
+      "unit": 1
     },
     {
       "group": "외부 HUD",
@@ -3109,6 +3318,5 @@
       "default": 0,
       "unit": 1
     }
-
   ]
 }

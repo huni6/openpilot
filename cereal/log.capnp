@@ -157,6 +157,7 @@ struct OnroadEvent @0xc4fa6047f024e718 {
     audio0 @114;
 
     torqueNNLoad @118;
+    clampSteerActive @123;    # carrot: the minimum-distance clamp's laneless steering correction is on (a ding)
 
     soundsUnavailableDEPRECATED @47;
   }
@@ -846,6 +847,7 @@ struct ControlsState @0x97ff69c53601abf1 {
   forceDecel @51 :Bool;
 
   activeLaneLine @67 : Bool;
+  clampSteerActive @68 :Bool;  # carrot: the laneless min-distance clamp correction is meaningfully on (selfdrived dings)
 
   lateralControlState :union {
     pidState @53 :LateralPIDState;
@@ -2269,6 +2271,17 @@ struct LiveParametersData {
   steerRatioValid @19 :Bool = true;
   stiffnessFactorValid @20 :Bool = true;
 
+  vehicleDynamics @21 :VehicleDynamics;   # carrot: the applied VehicleCenterToFrontRatio snapshot (common/vehicle_dynamics.py)
+
+  struct VehicleDynamics {
+    valid @0 :Bool;
+    mass @1 :Float64;
+    wheelbase @2 :Float64;
+    centerToFront @3 :Float64;
+    rotationalInertia @4 :Float64;
+    tireStiffnessFront @5 :Float64;
+    tireStiffnessRear @6 :Float64;
+  }
 
   struct FilterState {
     value @0 : List(Float64);

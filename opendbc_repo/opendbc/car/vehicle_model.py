@@ -44,6 +44,17 @@ class VehicleModel:
     self.cR: float = stiffness_factor * self.cR_orig
     self.sR: float = steer_ratio
 
+  def update_dynamics(self, dynamics) -> None:
+    """Replace base dynamics while retaining the learned steering parameters (carrot VehicleCenterToFrontRatio)."""
+    stiffness_factor = self.cF / self.cF_orig
+    self.m = dynamics.mass
+    self.j = dynamics.rotationalInertia
+    self.aF = dynamics.centerToFront
+    self.aR = self.l - self.aF
+    self.cF_orig = dynamics.tireStiffnessFront
+    self.cR_orig = dynamics.tireStiffnessRear
+    self.update_params(stiffness_factor, self.sR)
+
   def steady_state_sol(self, sa: float, u: float, roll: float) -> np.ndarray:
     """Returns the steady state solution.
 
