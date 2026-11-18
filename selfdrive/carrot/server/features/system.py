@@ -9,7 +9,7 @@ from ..live_runtime.broker import RealtimeBroker
 from ..live_runtime.normalize import to_transport_safe
 from ..config import OFFROAD_ASSETS_DIR
 from ..services.device_info import get_calibration_status, get_device_network
-from ..services.params import HAS_PARAMS, RATIO_KEY, Params, restore_param_values_validated
+from ..services.params import HAS_PARAMS, Params, restore_param_values_validated
 from ..services.settings import get_settings_cached
 from ..services.time_sync import TIME_SYNC_DEBUG_DEFAULT, sync_system_time_from_browser
 
@@ -316,9 +316,6 @@ async def api_set_default(request: web.Request) -> web.Response:
       for entry in restored.get("preview", {}).get("entries", [])
       if entry.get("apply")
     }
-    if RATIO_KEY in applied_values:
-      # stored as 0 (follow the installed vehicle); the page shows the vehicle's ratio
-      applied_values[RATIO_KEY] = values[RATIO_KEY]
     status = 200 if ok else 500
     return web.json_response({
       "ok": ok,

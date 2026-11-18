@@ -102,7 +102,7 @@ WIP-FR의 실시간 차량 제원(WIP-FR `docs/live_vehicle_specs_20261020.md`)�
 - 맥 테스트
   - 제어: `selfdrive/controls/tests/test_min_distance_clamp.py`(WIP-FR 테스트), `test_lateral_limits_and_lane_mode.py`, `test_vehicle_dynamics_consumers.py` 82개
   - 무게중심: `common/tests/test_vehicle_dynamics.py` 45개
-  - 당근 서버: `selfdrive/carrot/server/tests` 60개(새 `test_vehicle_center_ratio.py` 포함)
+  - 당근 서버: `selfdrive/carrot/server/tests` 61개(새 `test_vehicle_center_ratio.py` 포함)
 - 실제 controlsd·lateral planner를 맥에서 돌렸다. 네이티브 IPC·Params·MPC만 대신하고, 메시지는 실제 capnp, 차량은 opendbc의 EV6 CarParams다.
   - 레인리스에서 왼쪽 차선 95cm 붙은 계획: 보정 0.00128(순수추종 계산값과 같음)이 들고 띵 플래그가 선다. 클램프를 끄면 0이다.
   - 레인모드에서 곡률 0.002 → 0.006(설정 40): 레인리스로 가고, 0.002로 돌아온 뒤 0.5초엔 그대로 레인리스, 1.5초엔 레인모드다. 설정 0이면 안 바뀐다.
@@ -120,7 +120,8 @@ WIP-FR의 실시간 차량 제원(WIP-FR `docs/live_vehicle_specs_20261020.md`)�
   - F2 도로경계·차선 배열이 깨진 모델 메시지에서 경로 클램프가 예외를 내 plannerd가 멈출 수 있음: 배열을 확인하고, 계산이 안 되면 경로를 그대로 둔다.
     WIP-FR의 같은 코드에도 있는 결함이다.
   - F3 무효 `radarState`의 앞차도 앞차로 셈: `valid`도 확인한다.
-  - F4 전체 설정 초기화가 무게중심을 차량 비율 숫자로 저장함: 초기화·프로필·복원도 0(차량 값 따름)으로 저장한다.
+  - F4 전체 설정 초기화가 무게중심을 차량 비율 숫자로 저장함: 초기화·프로필·JSON/QR 복원·파일 복원이 모두 거치는 쓰기 함수에서 차량 비율(또는 백업의 0)을 0(차량 값 따름)으로 저장한다.
+    재검토에서 나온 남은 경로(이미 숫자로 고정된 값, 파일 업로드 복원)와 미리보기에 0이 보이던 문제도 고쳤다. 미리보기·응답에는 화면에 보이는 값(차량 비율)을 쓴다.
   - F5 위 `DynamicsFollower`.
 - 못 함
   - 이 브랜치를 올린 실기기 부팅과 주행(EV6), 실제 Params 네이티브 등록 확인

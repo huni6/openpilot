@@ -377,6 +377,11 @@ def restore_param_values_from_backup(values: Dict[str, Any]) -> Dict[str, Any]:
       elif t == ParamKeyType.INT:
         params.put_int(key, int(float(value)))
 
+      elif t == ParamKeyType.FLOAT and key == RATIO_KEY and center_ratio_to_store is not None:
+        # every restore, profile and reset ends here: the vehicle's own ratio (or a backup's 0) is stored as 0
+        from .settings import current_center_ratio_default
+        params.put_float(key, center_ratio_restore_value(value, current_center_ratio_default(params)))
+
       elif t == ParamKeyType.FLOAT:
         params.put_float(key, float(value))
 
@@ -1065,6 +1070,20 @@ def _values_equal(t: Any, left: Any, right: Any) -> bool:
     return str(left) == str(right)
 
 
+def _center_ratio_raw_is_follow(params: "Params") -> bool:
+  """Whether the stored ratio means 'follow the vehicle' because it is 0 or missing (not merely unreadable)."""
+  try:
+    raw = params.get(RATIO_KEY)
+  except Exception:
+    return False
+  if raw is None or raw in ("", b""):
+    return True
+  try:
+    return float(raw.decode() if isinstance(raw, bytes) else raw) == 0.0
+  except (TypeError, ValueError, UnicodeDecodeError):
+    return False
+
+
 def center_ratio_restore_value(value: Any, default: Optional[float]) -> float:
   """What a restored, profile or reset VehicleCenterToFrontRatio is stored as: 0 (a backup of 'follow the vehicle') or
   the vehicle's own ratio follow the vehicle (0.0); another 0.10-0.90 ratio is kept; anything else is ValueError."""
@@ -1102,12 +1121,19 @@ def preview_param_restore_values(values: Dict[str, Any], selected_keys: Optional
         reason = "unsupported type"
         can_apply = False
       elif key == RATIO_KEY and center_ratio_to_store is not None:
+        # entries carry what the page shows (the vehicle's ratio for 'follow the vehicle'); the write converts it back
+        # (restore_param_values_from_backup). Same only when the stored meaning matches: following the vehicle, or the
+        # same custom ratio; a ratio pinned to the vehicle's number is rewritten as 0.
         from .settings import current_center_ratio_default
         vehicle_ratio = current_center_ratio_default(params)
-        normalized_value = center_ratio_restore_value(raw_value, vehicle_ratio)
-        shown = vehicle_ratio if normalized_value == 0.0 else normalized_value
-        current_value = current_values.get(key, "")
-        if shown is not None and _values_equal(t, current_value, shown):
+        store = center_ratio_restore_value(raw_value, vehicle_ratio)
+        normalized_value = vehicle_ratio if store == 0.0 and vehicle_ratio is not None else store
+        try:
+          stored_now = stored_center_ratio(params.get(RATIO_KEY))
+        except Exception:
+          stored_now = None
+        if (store == 0.0 and stored_now is None and _center_ratio_raw_is_follow(params)) or \
+           (store != 0.0 and stored_now is not None and abs(stored_now - store) < 1e-6):
           status = "same"
           can_apply = False
       else:
