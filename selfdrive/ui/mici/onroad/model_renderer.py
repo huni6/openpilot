@@ -1,4 +1,5 @@
 import colorsys
+import time
 import numpy as np
 import pyray as rl
 from cereal import messaging, car
@@ -8,6 +9,7 @@ from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.selfdrive.locationd.calibrationd import HEIGHT_INIT
 from openpilot.selfdrive.ui.ui_state import ui_state, UIStatus
 from openpilot.selfdrive.ui.mici.onroad import blend_colors
+from openpilot.selfdrive.ui.mici.onroad.lead_bar import LeadBar, LeadBarTarget
 from openpilot.system.ui.lib.application import gui_app, FontWeight
 from openpilot.system.ui.lib.text_draw import draw_text_ui_style
 from openpilot.system.ui.lib.shader_polygon import draw_polygon, Gradient
@@ -92,6 +94,10 @@ class ModelRenderer(Widget):
     
     self._lead_pt_filt = [None, None]
     self._radar_info_items: list[RadarInfoItem] = []
+    # NewUi 1: a thin green (radar) / blue (vision) bar under the lead replaces the carrot lead box
+    self._lead_bar = LeadBar()
+    self._lead_bar_context = None
+    self._model_frame = -1
     self._font_display: rl.Font = gui_app.font(FontWeight.DISPLAY)
 
     self._exp_gradient = Gradient(
@@ -111,6 +117,47 @@ class ModelRenderer(Widget):
     self._transform_dirty = True
 
   def _render(self, rect: rl.Rectangle):
+    new_ui = getattr(ui_state, "new_ui", False)
+    if self._lead_bar_context is not None and self._lead_bar_context[1] != new_ui:
+      self._transform_dirty = True
+    self._paint(rect, new_ui)
+    # Animate the small marker every display frame, also when the road layer returned early.
+    self._draw_lead_bar(rect, new_ui)
+
+  def _draw_lead_bar(self, rect: rl.Rectangle, new_ui: bool):
+    context = (ui_state.started_frame, new_ui, rect.x, rect.y, rect.width, rect.height)
+    if context != self._lead_bar_context:
+      self._lead_bar.reset()
+      self._lead_bar_context = context
+    if not new_ui or not ui_state.started or not self._longitudinal_control:
+      self._lead_bar.reset()
+      return
+
+    sm = ui_state.sm
+    now = time.monotonic()
+
+    def fresh(service, max_age=None):
+      return (sm.valid[service] and sm.alive[service] and sm.recv_frame[service] > 0 and
+              sm.recv_frame[service] >= ui_state.started_frame and
+              (max_age is None or 0 <= now - sm.recv_time[service] <= max_age))
+
+    target = None
+    if (fresh('radarState', 0.35) and fresh('modelV2', 0.35) and fresh('liveCalibration') and
+        self._model_frame >= ui_state.started_frame and self._clip_region is not None and self._path.raw_points.size):
+      lead = sm['radarState'].leadOne
+      if lead.status and np.isfinite(lead.dRel) and np.isfinite(lead.yRel) and lead.dRel > 0:
+        idx = self._get_path_length_idx(self._path.raw_points[:, 0], lead.dRel)
+        z = float(self._path.raw_points[idx, 2]) + self._path_offset_z
+        y_rel = float(lead.yRel)
+        left = self._map_to_screen(lead.dRel, -y_rel - 1.2, z)
+        right = self._map_to_screen(lead.dRel, -y_rel + 1.2, z)
+        if left is not None and right is not None:
+          x, y = (left[0] + right[0]) / 2, (left[1] + right[1]) / 2
+          if rect.x <= x <= rect.x + rect.width and rect.y <= y <= rect.y + rect.height - LeadBar.HEIGHT:
+            target = LeadBarTarget(x, y, abs(right[0] - left[0]) * 0.8, bool(lead.radar), int(lead.radarTrackId))
+    self._lead_bar.draw(target, now)
+
+  def _paint(self, rect: rl.Rectangle, new_ui: bool = False):
     sm = ui_state.sm
 
     self._torque_filter.update(-ui_state.sm['carOutput'].actuatorsOutput.torque)
@@ -143,6 +190,7 @@ class ModelRenderer(Widget):
     model_updated = sm.updated['modelV2']
     if model_updated or sm.updated['radarState'] or self._transform_dirty:
       if model_updated:
+        self._model_frame = sm.recv_frame['modelV2']
         self._update_raw_points(model)
 
       path_x_array = self._path.raw_points[:, 0]
@@ -150,7 +198,7 @@ class ModelRenderer(Widget):
         return
 
       self._update_model(lead_one, path_x_array)
-      if render_lead_indicator:
+      if render_lead_indicator and not new_ui:
         self._update_leads_carrot(radar_state, path_x_array)
         
       if ui_state.show_radar_info > 0 and radar_state is not None:
@@ -166,7 +214,7 @@ class ModelRenderer(Widget):
       #self._draw_lane_lines()
       self._draw_path(sm)
 
-    if render_lead_indicator and radar_state:
+    if render_lead_indicator and radar_state and not new_ui:
       self._draw_lead_indicator()
     if ui_state.show_radar_info > 0:
       self._draw_radar_info()
@@ -399,6 +447,18 @@ class ModelRenderer(Widget):
 
   def _draw_lane_lines(self):
     """Draw lane lines and road edges"""
+    if getattr(ui_state, "new_ui", False):
+      # NewUi 1 (as WIP-FR): a neutral white outline, its strength from the model's confidence
+      for i, lane_line in enumerate(self._lane_lines):
+        if lane_line.projected_points.size:
+          alpha = int(np.clip(self._lane_line_probs[i], 0.0, 0.7) * 255)
+          draw_polygon(self._rect, lane_line.projected_points, rl.Color(255, 255, 255, alpha))
+      for i, road_edge in enumerate(self._road_edges):
+        if road_edge.projected_points.size:
+          alpha = int(np.clip(1.0 - self._road_edge_stds[i], 0.0, 0.7) * 255)
+          draw_polygon(self._rect, road_edge.projected_points, rl.Color(255, 255, 255, alpha))
+      return
+
     """Two closest lines should be green (lane line or road edges)"""
     for i, lane_line in enumerate(self._lane_lines):
       if lane_line.projected_points.size == 0:

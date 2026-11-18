@@ -172,6 +172,7 @@ class AugmentedRoadView(CameraView):
 
     self._fade_texture = gui_app.texture("icons_mici/onroad/onroad_fade.png")
     self._fade_alpha_filter = FirstOrderFilter(0, 0.1, 1 / gui_app.target_fps)
+    self._clock_face = None  # NewUi 2, created on first use
     self._robot_face = None  # NewUi 3, created on first use
 
     # debug
@@ -204,15 +205,19 @@ class AugmentedRoadView(CameraView):
     # Update calibration before rendering
     self._update_calibration()
 
-    # NewUi 3: while onroad the robot face replaces the camera, model, HUD and driver monitoring icon, using the
-    # whole display (no right status rail). Alerts the face does not react to itself still draw on top.
+    # NewUi 1-3 use the whole display, without the right status rail (as WIP-FR). While onroad, 2 (clock) and
+    # 3 (robot face) replace the camera, model, HUD and driver monitoring icon; alerts still draw on top (the robot
+    # face keeps only critical ones), and so do the eGPU and Jetson badges.
+    new_ui = getattr(ui_state, "new_ui", False)
     robot_ui = ui_state.started and getattr(ui_state, "robot_ui", False)
+    clock_ui = ui_state.started and getattr(ui_state, "clock_ui", False)
+    face_ui = robot_ui or clock_ui
 
     # Create inner content area with border padding
     self._content_rect = rl.Rectangle(
       self.rect.x,
       self.rect.y,
-      self.rect.width - (0 if robot_ui else SIDE_PANEL_WIDTH),
+      self.rect.width - (0 if new_ui else SIDE_PANEL_WIDTH),
       self.rect.height,
     )
 
@@ -228,25 +233,32 @@ class AugmentedRoadView(CameraView):
     road_view_mode = self._road_view_mode()
     if robot_ui:
       self._robot().render(self._content_rect)
+    elif clock_ui:
+      self._clock().render(self._content_rect)
     elif road_view_mode in (2, 3):
       rl.draw_rectangle_rec(self._content_rect, rl.BLACK)
     else:
       # Render the base camera view
       super()._render(self._content_rect)
 
-    if not robot_ui:
+    if not face_ui:
       if road_view_mode in (0, 2):
         # Draw all UI overlays
         self._model_renderer.render(self._content_rect)
 
-      # Fade out bottom of overlays for looks
-      rl.draw_texture_ex(self._fade_texture, rl.Vector2(self._content_rect.x, self._content_rect.y), 0.0, 1.0, rl.WHITE)
+      # Fade out bottom of overlays for looks (stretched over the wider NewUi view)
+      if new_ui:
+        rl.draw_texture_pro(self._fade_texture, rl.Rectangle(0, 0, self._fade_texture.width, self._fade_texture.height),
+                            self._content_rect, rl.Vector2(0, 0), 0., rl.WHITE)
+      else:
+        rl.draw_texture_ex(self._fade_texture, rl.Vector2(self._content_rect.x, self._content_rect.y), 0.0, 1.0, rl.WHITE)
 
     alert_to_render, not_animating_out = self._alert_renderer.will_render()
 
-    # Hide DMoji when disengaged unless AlwaysOnDM is enabled
-    should_draw_dmoji = (not robot_ui and not self._hud_renderer.drawing_top_icons() and ui_state.is_onroad() and
-                         (ui_state.status != UIStatus.DISENGAGED or ui_state.always_on_dm))
+    # Hide DMoji when disengaged unless AlwaysOnDM is enabled; NewUi 1 also leaves the alert area to the alert
+    should_draw_dmoji = (not face_ui and not self._hud_renderer.drawing_top_icons() and ui_state.is_onroad() and
+                         (ui_state.status != UIStatus.DISENGAGED or ui_state.always_on_dm) and
+                         (not new_ui or alert_to_render is None))
     self._driver_state_renderer.set_should_draw(should_draw_dmoji)
     self._driver_state_renderer.set_position(self._rect.x + 16, self._rect.y + 10)
     self._driver_state_renderer.render()
@@ -255,8 +267,8 @@ class AugmentedRoadView(CameraView):
     self._hud_renderer.set_wheel_critical_icon(alert_to_render is not None and not not_animating_out and
                                                alert_to_render.visual_alert == car.CarControl.HUDControl.VisualAlert.steerRequired)
     # TODO: have alert renderer draw offroad mici label below
-    if robot_ui:
-      # The eGPU state stays visible over the face; the rest of the HUD is replaced by it.
+    if face_ui:
+      # The eGPU state stays visible over the clock and the face; the rest of the HUD is replaced by them.
       self._hud_renderer.draw_egpu_status(self._content_rect)
     else:
       self._hud_renderer.render(self._content_rect)
@@ -272,7 +284,7 @@ class AugmentedRoadView(CameraView):
 
     # Custom UI extension point - add custom overlays here
     # Use self._content_rect for positioning within camera bounds
-    if not robot_ui:
+    if not new_ui:
       self._traffic_light.render(self.rect)
       if not self._traffic_light.is_visible():
         self._confidence_ball.render(self.rect)
@@ -293,6 +305,12 @@ class AugmentedRoadView(CameraView):
     msg = messaging.new_message('uiDebug')
     msg.uiDebug.drawTimeMillis = (time.monotonic() - start_draw) * 1000
     self._pm.send('uiDebug', msg)
+
+  def _clock(self):
+    if self._clock_face is None:
+      from openpilot.selfdrive.ui.mici.onroad.clock_face import ClockFace
+      self._clock_face = ClockFace()
+    return self._clock_face
 
   def _robot(self):
     if self._robot_face is None:

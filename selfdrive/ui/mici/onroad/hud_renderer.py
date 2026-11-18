@@ -183,6 +183,8 @@ class HudRenderer(Widget):
 
     self._can_draw_top_icons = True
     self._show_wheel_critical = False
+    self._new_ui_active = False   # NewUi 1: the Wayon presentation (wayon_hud.py) replaces the carrot HUD
+    self._wayon_hud = None
 
     self._font_bold: rl.Font = gui_app.font(FontWeight.BOLD)
     self._font_medium: rl.Font = gui_app.font(FontWeight.MEDIUM)
@@ -222,6 +224,9 @@ class HudRenderer(Widget):
 
   def drawing_top_icons(self) -> bool:
     # whether we're drawing any top icons currently
+    wayon_hud = getattr(self, "_wayon_hud", None)
+    if getattr(self, "_new_ui_active", False) and wayon_hud is not None:
+      return wayon_hud.drawing_top_icons()
     return bool(self._set_speed_alpha_filter.x > 1e-2)
 
   def _update_state(self) -> None:
@@ -276,6 +281,23 @@ class HudRenderer(Widget):
 
   def _render(self, rect: rl.Rectangle) -> None:
     """Render HUD elements to the screen."""
+    # NewUi 1-3 share the full-width layout; only 1 reaches here (2 and 3 replace the HUD with a clock or a face).
+    new_ui = getattr(ui_state, "new_ui", False)
+    if new_ui != getattr(self, "_new_ui_active", False):
+      if new_ui:
+        if getattr(self, "_wayon_hud", None) is None:
+          from openpilot.selfdrive.ui.mici.onroad.wayon_hud import WayonHud
+          self._wayon_hud = WayonHud()
+        self._wayon_hud.reset()
+        if getattr(self, "_engaged", False):
+          self._set_speed_changed_time = rl.get_time()
+      self._new_ui_active = new_ui
+    if new_ui:
+      self._wayon_hud.draw(rect, self)
+      if self._can_draw_top_icons:
+        self._draw_traffic_light_info(int(rect.x + 212), int(rect.y + 40))
+        self.draw_egpu_status(rect)
+      return
 
     # self._torque_bar.render(rect) # 아이콘에 토크 적용: 토크바 미사용
 
@@ -287,13 +309,25 @@ class HudRenderer(Widget):
     self.draw_egpu_status(rect)
 
   def draw_egpu_status(self, rect: rl.Rectangle) -> None:
-    """eGPU status at the top right (as in carrot-wip), also over the NewUi 3 robot face.
+    """eGPU status at the top right (as in carrot-wip), also in NewUi 1 and over the NewUi 2 clock / 3 robot face.
 
-    Drawn before alerts, which cover it; the Jetson badge keeps its bottom-right place."""
+    Drawn before alerts, which cover it; the Jetson badge keeps its bottom-right place (top right in NewUi 1)."""
     if ui_state.egpu_badge:
       draw_jetlink_badge(ui_state.egpu_badge, rl.Rectangle(rect.x + rect.width - 24 - 160, rect.y + 12, 160, 34), 22)
 
   def draw_jetlink_status(self, rect: rl.Rectangle, alert=None) -> None:
+    if getattr(ui_state, "new_ui", False) and not getattr(ui_state, "clock_ui", False) and \
+       not getattr(ui_state, "robot_ui", False):
+      # NewUi 1 (as WIP-FR): the top right, under the eGPU badge when there is one; the bottom right belongs to the
+      # BSM icon and the torque bar there, and the whole alert area stays clear.
+      if alert is not None:
+        return
+      y = rect.y + (12 + 34 + 6 if ui_state.egpu_badge else 24)
+      draw_jetlink_badge(ui_state.jetlink_badge, rl.Rectangle(rect.x + rect.width - 106, y, 80, 42), 13, stacked=True)
+      if ui_state.jetlink_detail:
+        draw_jetlink_detail(ui_state.jetlink_detail, rl.Rectangle(rect.x + rect.width - 106, y + 42, 80, 52),
+                            10, time.monotonic() - ui_state.jetlink_detail_since)
+      return
     # Render after ordinary alerts, without covering their top-aligned text.
     if alert is not None:
       if alert.status != log.SelfdriveState.AlertStatus.normal or alert.size == log.SelfdriveState.AlertSize.full:

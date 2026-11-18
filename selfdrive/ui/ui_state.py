@@ -15,16 +15,20 @@ from openpilot.system.hardware import HARDWARE, PC
 
 BACKLIGHT_OFFROAD = 65 if HARDWARE.get_device_type() == "mici" else 50
 
-# NewUi, numbered as on WIP-FR so a stored value means the same on both branches: 0 = Carrot UI, 3 = robot face
-# (comma 4 only). WIP-FR's 1 (Wayon/sunnypilot style) and 2 (clock) do not exist here and show the Carrot UI.
+# NewUi, numbered as on WIP-FR so a stored value means the same on both branches (comma 4 only):
+# 0 = Carrot UI, 1 = Wayon/sunnypilot style, 2 = clock face, 3 = robot face.
 NEW_UI_CARROT = 0
+NEW_UI_WAYON = 1
+NEW_UI_CLOCK = 2
 NEW_UI_ROBOT = 3
 NEW_UI_CHECK_S = 0.5   # how often the setting is re-read, so a change applies without a reboot
 
 
 def new_ui_mode(value) -> int:
-  """Map a stored NewUi value to a mode this branch has."""
-  return NEW_UI_ROBOT if isinstance(value, int) and not isinstance(value, bool) and value == NEW_UI_ROBOT else NEW_UI_CARROT
+  """Map a stored NewUi value to a display mode; anything but an integer 0-3 is the Carrot UI."""
+  if isinstance(value, int) and not isinstance(value, bool) and NEW_UI_CARROT <= value <= NEW_UI_ROBOT:
+    return value
+  return NEW_UI_CARROT
 
 
 class UIStatus(Enum):
@@ -115,7 +119,9 @@ class UIState:
     self._egpu_update_time: float = float('-inf')
     # NewUi 3: the comma 4 onroad screen shows the robot face instead of the camera, model and HUD.
     self.new_ui_mode: int = NEW_UI_CARROT
-    self.robot_ui: bool = False
+    self.new_ui: bool = False     # 1-3: the full-width NewUi layout (no right status rail)
+    self.clock_ui: bool = False   # 2: an analog clock replaces the onroad view
+    self.robot_ui: bool = False   # 3: a robot face replaces the onroad view
     self._new_ui_update_time: float = float('-inf')
 
     # Callbacks
@@ -180,6 +186,8 @@ class UIState:
     except Exception:
       mode = NEW_UI_CARROT
     self.new_ui_mode = mode
+    self.new_ui = mode >= NEW_UI_WAYON
+    self.clock_ui = mode == NEW_UI_CLOCK
     self.robot_ui = mode == NEW_UI_ROBOT
 
   def _update_egpu_status(self) -> None:
