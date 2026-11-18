@@ -151,7 +151,8 @@ class CarInterface(CarInterfaceBase):
 
     # Common lateral control setup
 
-    ret.centerToFront = ret.wheelbase * 0.4
+    # The EV6 owner asked for a 0.5 front-axle-to-CG ratio; other cars keep 0.4.
+    ret.centerToFront = ret.wheelbase * (0.5 if candidate == CAR.KIA_EV6 else 0.4)
     ret.steerActuatorDelay = 0.1
     ret.steerLimitTimer = 0.4
     if ret.flags & HyundaiFlags.ANGLE_CONTROL:
