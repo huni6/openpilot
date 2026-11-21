@@ -49,6 +49,11 @@ HAND_R = 13         # a hand's radius
 # the outer hand reaches the bottom edge: the wheel only turns as far as its hands, still on screen, can take it
 WHEEL_TURN_GAIN = 3.0
 WHEEL_TURN_MAX = math.degrees(math.acos((WHEEL_DROP + HAND_R) / WHEEL_R)) - HAND_AT   # about 9 deg
+# lane mode: the rim fills with colour from its two hands; laneless: it empties back into them (FaceModel.LANE_MEET)
+LANE_BURST_S = 0.5    # the little burst where the two fronts meet at 12 o'clock
+LANE_SHINE_S = 3.6    # while full, a glint runs along the rim this often
+LANE_SHINE_RUN = 0.3  # the part of that it takes to cross
+GRIP_GROW = 0.22      # a hand grows this much (x P['grip']) as it tightens its grip
 # the cruise set speed: big rolling digits in place of the eyes (they shut to a line first, and open after it)
 SPEED_FONT = 120
 SPEED_ROLL_S = 0.4   # one digit rolling over to its new value
@@ -119,6 +124,7 @@ class RobotFace:
       override=bool(car_ok and cs.steeringPressed),
       set_speed=float(cs.vCruiseCluster or cs.vCruise) if car_ok else 0.0,
     )
+    inp.lane_mode = bool(fresh('controlsState') and sm['controlsState'].activeLaneLine)   # what steering follows now
     if fresh('modelV2'):
       meta = sm['modelV2'].meta
       state, direction = str(meta.laneChangeState), str(meta.laneChangeDirection).lower()
@@ -523,14 +529,24 @@ class RobotFace:
     for pad, al in ((9, 0.08), (5, 0.12), (2, 0.18)):          # a soft halo in steps (crisp, no blurred texture)
       rl.draw_ring(c, inner - pad, outer + pad, 180, 360, 48, color(glow, al * a))
     rl.draw_ring(c, inner, outer, 180, 360, 48, rl.Color(20, 20, 20, int(250 * a)))
-    for r in (inner, outer):
-      rl.draw_ring(c, r - 1.2, r + 1.2, 180, 360, 48, color(ink, 0.7 * a))
     turn = WHEEL_TURN_MAX * math.tanh(WHEEL_TURN_GAIN * P['steer'].v / WHEEL_TURN_MAX)   # smooth up to the hands' reach
     turn += math.sin(m.clock * 43) * 1.6 * effort if effort > 0.2 else 0.0
+    ext = self._lane_fill(c, turn, ink, glow, a)
+    for r in (inner, outer):
+      rl.draw_ring(c, r - 1.2, r + 1.2, 180, 360, 48, color(ink, 0.7 * a))
     th = math.radians(turn)
-    rl.draw_rectangle_pro(rl.Rectangle(cx + math.sin(th) * WHEEL_R, cy - math.cos(th) * WHEEL_R, 9, 2 * WHEEL_RIM + 2),
-                          rl.Vector2(4.5, WHEEL_RIM + 1), turn, color(ink, 0.95 * a))   # the 12 o'clock stripe
+    sx, sy = cx + math.sin(th) * WHEEL_R, cy - math.cos(th) * WHEEL_R
+    covered = clamp((ext - HAND_AT + 2) / 8, 0, 1)                    # dark on a filled rim, light on an empty one
+    k = (m.clock - m.lane_meet_at) / LANE_BURST_S                     # the two fronts just met there
+    flash = 1 - k if 0 <= k < 1 else 0.0
+    stripe = mix(mix(ink, (14, 30, 22), covered * 0.85), (255, 255, 255), flash)
+    rl.draw_rectangle_pro(rl.Rectangle(sx, sy, 9, 2 * WHEEL_RIM + 2), rl.Vector2(4.5, WHEEL_RIM + 1), turn,
+                          color(stripe, 0.95 * a))   # the 12 o'clock stripe
+    if flash > 0:
+      self._lane_burst(k, sx, sy, c, turn, ink, glow, a)
     lift = 1 - clamp(P['hands'].v, 0, 1)
+    squeeze = clamp(P['grip'].v, -1, 1.5)
+    grip = 1 + GRIP_GROW * squeeze if abs(squeeze) > 1e-3 else 1.0   # settled: exactly its size
     for side in (-1, 1):
       ang = math.radians(turn + side * HAND_AT)
       hx = cx + math.sin(ang) * WHEEL_R + side * lift * 14 + math.sin(m.clock * 37 + side) * 1.2 * effort
@@ -538,10 +554,68 @@ class RobotFace:
       ha = a * (1 - 0.25 * lift) * (1 - clamp(P['p_buckle'].v, 0, 1) if side < 0 else 1.0)   # holding the buckle
       if ha < 0.02:
         continue
-      rl.draw_circle_v(rl.Vector2(hx, hy), 18, color(glow, 0.16 * ha))
-      rl.draw_circle_v(rl.Vector2(hx, hy), HAND_R, color(body, ha))
-      rl.draw_circle_v(rl.Vector2(hx - side * 7, hy - 8), 6, color(ink, ha))   # the thumb over the rim
+      rl.draw_circle_v(rl.Vector2(hx, hy), 18 * grip, color(glow, 0.16 * ha))
+      if ext > 0.3:     # a dark edge keeps the hand apart from the coloured rim under it
+        rl.draw_circle_v(rl.Vector2(hx, hy), HAND_R * grip + 2.5, color((6, 10, 8), ha * clamp(ext / 6, 0, 1)))
+      rl.draw_circle_v(rl.Vector2(hx, hy), HAND_R * grip, color(body, ha))
+      rl.draw_circle_v(rl.Vector2(hx - side * 7 * grip, hy - 8 * grip), 6 * grip, color(ink, ha))   # the thumb over the rim
     return top, cy, a
+
+  def _lane_fill(self, c, turn, ink, glow, a):
+    """Lane mode: colour runs along the rim from both hands, outward to its ends and inward to 12 o'clock, where the
+    two fronts meet (FaceModel.LANE_MEET); laneless, it runs back into the hands. Each front has a bright tip while it
+    moves; while full the colour breathes and a glint crosses the rim now and then. Returns how far (degrees) each
+    front has run from its hand (0: empty)."""
+    m, P = self.model, self.model.P
+    lane = P['lane']
+    ext = max(0.0, lane.v) / m.LANE_MEET * HAND_AT
+    if ext <= 0.3:
+      return 0.0
+    hold = 0.6 + 0.4 * clamp(P['hands'].v, 0, 1)           # paler while its hands are off the wheel
+    full = clamp((lane.v - 0.9) / 0.1, 0, 1)
+    breathe = 1 - 0.1 * full * (0.5 + 0.5 * math.sin(m.clock * 2.4))
+    inner, outer = WHEEL_R - WHEEL_RIM + 1.2, WHEEL_R + WHEEL_RIM - 1.2
+    top = 270 + turn                                        # raylib angles: 270 is up, clockwise on screen
+    spans = [(top + s * HAND_AT - ext, top + s * HAND_AT + ext) for s in (-1, 1)]
+    if spans[0][1] >= spans[1][0]:                          # the fronts have met at the top: one span, no overlap
+      spans = [(spans[0][0], spans[1][1])]
+    fill = fade(mix(glow, ink, 0.15), 0.95 * a * hold * breathe)
+    shine = fade(mix(glow, ink, 0.6), 0.95 * a * hold * breathe)
+    for lo, hi in spans:
+      lo, hi = max(lo, 180.0), min(hi, 360.0)
+      if hi - lo > 0.2:
+        seg = max(3, int((hi - lo) / 3))
+        rl.draw_ring(c, inner, outer, lo, hi, seg, fill)
+        rl.draw_ring(c, outer - 4.5, outer - 2.5, lo, hi, seg, shine)   # a glossy line along its top edge
+    tip = clamp(abs(lane.vel) * 0.45, 0, 1) * a
+    if tip > 0.02:
+      fronts = [top - HAND_AT - ext, top + HAND_AT + ext]
+      if ext < HAND_AT:
+        fronts += [top - HAND_AT + ext, top + HAND_AT - ext]
+      for f in fronts:
+        if 181 <= f <= 359:
+          rl.draw_ring(c, inner - 1.5, outer + 1.5, f - 2.2, f + 2.2, 3, color(ink, tip))
+    k = fract(m.clock / LANE_SHINE_S) / LANE_SHINE_RUN
+    if full > 0 and k < 1:
+      pos = top - 62 + 124 * ease_in_out(k)
+      rl.draw_ring(c, inner, outer, pos - 8, pos + 8, 4, color(ink, math.sin(math.pi * k) * 0.5 * full * a * hold))
+    return ext
+
+  def _lane_burst(self, k, x, y, c, turn, ink, glow, a):
+    """Where the fill's two fronts meet at 12 o'clock (k: 0..1 of LANE_BURST_S): a flash, short rays fanning up and
+    a ring of light running out from the rim."""
+    e, fade_out = ease_out_cubic(k), (1 - k) * a
+    white = mix(ink, (255, 255, 255), 0.6)
+    r = WHEEL_R + WHEEL_RIM + 3 + 18 * e
+    rl.draw_ring(c, r, r + 3, 180, 360, 48, color(glow, 0.5 * fade_out))
+    rl.draw_circle_v(rl.Vector2(x, y), 6 + 12 * e, color(glow, 0.35 * fade_out))
+    rl.draw_circle_v(rl.Vector2(x, y), 4 + 5 * (1 - e), color(white, fade_out))
+    for i in range(7):
+      ang = math.radians(turn - 66 + i * 22)
+      r0 = 13 + 18 * e
+      r1 = r0 + 11 * (1 - k) + 2
+      rl.draw_line_ex(rl.Vector2(x + math.sin(ang) * r0, y - math.cos(ang) * r0),
+                      rl.Vector2(x + math.sin(ang) * r1, y - math.cos(ang) * r1), 3.5, color(white, fade_out))
 
   # ---- icons that say what an event means ---------------------------------------------------
   def _text(self, txt, x, y, size, col):

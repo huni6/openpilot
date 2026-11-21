@@ -20,7 +20,7 @@ class SM(dict):
       carOutput=NS(actuatorsOutput=NS(torque=0.0)),
       modelV2=NS(meta=NS(laneChangeState='off', laneChangeDirection='none')),
       radarState=NS(leadOne=NS(status=False, dRel=0.0, vLead=0.0)),
-      controlsState=NS(curvature=0.0),
+      controlsState=NS(curvature=0.0, activeLaneLine=False),
       onroadEvents=[])
     names = ('carState', 'selfdriveState', 'carControl', 'carOutput', 'modelV2', 'radarState', 'controlsState',
              'onroadEvents')
@@ -421,3 +421,79 @@ def test_small_steering_angles_show_bigger_and_the_hands_stay_on_screen(face):
     assert abs(turn) <= g['WHEEL_TURN_MAX'] + 1e-6
     assert len(hands) == 2 and all(h[1][1] + g['HAND_R'] <= face.rect.height + 0.5 for h in hands)
   assert g['WHEEL_TURN_MAX'] == pytest.approx(9.4, abs=0.1)
+
+
+def test_lane_mode_input_reads_what_steering_follows(face):
+  sm = face.ui.sm
+  assert not face.f._inputs().lane_mode
+  sm['controlsState'].activeLaneLine = True
+  assert face.f._inputs().lane_mode
+  sm.valid['controlsState'] = False                        # an invalid controlsState is not lane mode
+  assert not face.f._inputs().lane_mode
+  sm.valid['controlsState'] = True
+  sm.recv_frame['controlsState'] = 9                       # nor one from a previous drive
+  assert not face.f._inputs().lane_mode
+
+
+def test_lane_mode_fills_the_rim_and_laneless_leaves_it_empty(face):
+  m, sm = face.f.model, face.ui.sm
+  sm['selfdriveState'].enabled = True
+  g = type(face.f).__init__.__globals__
+  inner, outer = g['WHEEL_R'] - g['WHEEL_RIM'], g['WHEEL_R'] + g['WHEEL_RIM']
+
+  def frame():
+    face.calls.clear()
+    face.f.draw(face.rect)
+    rings = [c for c in face.calls if c[0] == 'draw_ring']
+    # inside the rim's edges, wider than the glint that crosses a full rim now and then
+    fill = [c for c in rings if c[2] > inner and c[3] < outer and c[3] - c[2] > 10 and c[5] - c[4] > 20]
+    stripe = [c for c in face.calls if c[0] == 'draw_rectangle_pro' and c[1][2] == 9][0]
+    hands = [c for c in face.calls if c[0] == 'draw_circle_v' and c[2] == g['HAND_R']]
+    return fill, stripe, hands
+
+  for _ in range(80):                                      # laneless: the rim stays dark, as before
+    m.update(0.05, face.f._inputs())
+  fill, stripe, hands = frame()
+  assert fill == [] and len(hands) == 2
+  light = stripe[4]
+  sm['controlsState'].activeLaneLine = True
+  for _ in range(8):                                       # filling: two spans, one from each hand
+    m.update(0.05, face.f._inputs())
+  fill, *_ = frame()
+  assert len(fill) == 2
+  (lo1, hi1), (lo2, hi2) = sorted((c[4], c[5]) for c in fill)
+  assert hi1 < 270 < lo2                                   # not met at 12 o'clock yet
+  for _ in range(60):
+    m.update(0.05, face.f._inputs())
+  fill, stripe, hands = frame()
+  assert len(fill) == 1 and fill[0][4] == pytest.approx(180) and fill[0][5] == pytest.approx(360)   # the whole rim
+  assert sum(stripe[4][:3]) < sum(light[:3]) / 2           # the stripe turns dark on the coloured rim
+  assert len(hands) == 2                                   # hands back to their size once the squeeze is over
+  edges = [c for c in face.calls if c[0] == 'draw_circle_v' and c[2] == pytest.approx(g['HAND_R'] + 2.5)]
+  assert len(edges) == 2                                   # each with a dark edge against the colour
+  sm['controlsState'].activeLaneLine = False
+  for _ in range(60):                                      # laneless again: empty
+    m.update(0.05, face.f._inputs())
+  fill, stripe, _ = frame()
+  assert fill == [] and stripe[4] == light
+
+
+def test_the_fronts_meeting_draw_a_burst_at_12_oclock(face):
+  m, sm = face.f.model, face.ui.sm
+  sm['selfdriveState'].enabled = True
+  for _ in range(80):
+    m.update(0.05, face.f._inputs())
+  face.calls.clear()
+  face.f.draw(face.rect)
+  lines = len([c for c in face.calls if c[0] == 'draw_line_ex'])
+  sm['controlsState'].activeLaneLine = True
+  while m.lane_meet_at < 0:
+    m.update(0.05, face.f._inputs())
+  face.calls.clear()
+  face.f.draw(face.rect)
+  assert len([c for c in face.calls if c[0] == 'draw_line_ex']) >= lines + 7   # its rays
+  for _ in range(20):                                      # gone after LANE_BURST_S
+    m.update(0.05, face.f._inputs())
+  face.calls.clear()
+  face.f.draw(face.rect)
+  assert len([c for c in face.calls if c[0] == 'draw_line_ex']) == lines

@@ -13,6 +13,8 @@ CASES = {
   'driver-monitoring': 1.2, 'yawn': 50.2, 'asleep': 55.0, 'love': 1.0, 'cool': 1.2, 'think': 1.6, 'curious': 1.0,
   'straining': 2.2, 'set-speed': 2.6, 'set-speed-roll': 2.15, 'set-speed-down': 2.15, 'set-speed-engage': 1.4,
   'music': 3.2, 'hazard-lights': 3.4, 'whistle': 3.2,
+  # lane mode from 2 s: the rim filling from the hands, the fronts just met, full with a glint, emptying again (off at 4 s)
+  'lane-fill': 2.3, 'lane-meet': 2.6, 'lane-mode': 4.0, 'lane-empty': 4.35,
 }
 # driving-event reactions: case: (reaction, arg, engaged, seconds after it starts)
 EVENTS = {
@@ -87,6 +89,8 @@ def main():
           inp.hazard = inp.left_blinker = inp.right_blinker = True
         elif case == 'whistle':                                # driving, a driver-monitoring alert: the whistle
           inp.engaged, inp.dm_alert = True, True
+        elif case.startswith('lane-'):
+          inp.engaged, inp.lane_mode = True, 2.0 <= t < (4.0 if case == 'lane-empty' else 99.0)
         elif case == 'driver-monitoring':
           inp.dm_alert = True
         elif case in ('yawn', 'asleep'):

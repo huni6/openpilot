@@ -563,3 +563,58 @@ def test_seatbelt_holds_up_the_buckle_then_puts_it_away():
   assert m.last_event == 'seatbelt' and m.P['p_buckle'].v > 0.9
   run(m, inp, 3.0)
   assert m.P['p_buckle'].v < 0.1
+
+
+def test_lane_mode_fills_the_wheel_from_its_hands_and_laneless_empties_it(m):
+  inp = FaceInputs(session=1, v_ego=20.0, lane_mode=True)
+  run(m, inp, 2.0)
+  assert not m.lane_mode and m.P['lane'].v == pytest.approx(0.0, abs=1e-6)   # not driving: no wheel to fill
+  inp.engaged = True
+  run(m, inp, 4.0)                                       # engaged in lane mode: it fills while the wheel rises
+  assert m.lane_mode and m.P['lane'].v == pytest.approx(1.0, abs=0.03)
+  inp.lane_mode = False
+  run(m, inp, 0.3)
+  assert 0.3 < m.P['lane'].v < 0.95                      # emptying, not cut at once
+  run(m, inp, 2.0)
+  assert not m.lane_mode and abs(m.P['lane'].v) < 0.03
+  inp.lane_mode = True
+  run(m, inp, 3.0)
+  inp.engaged = False                                    # disengaged: it empties with the wheel going down
+  run(m, inp, 3.0)
+  assert not m.lane_mode and abs(m.P['lane'].v) < 0.03
+
+
+def test_lane_mode_fronts_meet_once_with_a_firmer_grip_and_a_glance_at_the_wheel(m):
+  inp = FaceInputs(session=1, v_ego=20.0, engaged=True)
+  run(m, inp, 8.0)                                       # past the engagement reaction
+  m.event_until = 0.0
+  start = m.clock
+  inp.lane_mode = True
+  m.update(0.05, inp)
+  assert m.hold is not None and m.hold[1] > 0.4           # a glance down at the wheel
+  grip = []
+  run(m, inp, 1.5, each=lambda: grip.append(m.P['grip'].v))
+  assert max(grip) > 0.3                                 # the hands squeeze it
+  meet = m.lane_meet_at - start
+  assert 0.35 < meet < 0.8                               # the two fronts meet partway through the fill
+  run(m, inp, 3.0)
+  assert m.lane_meet_at - start == pytest.approx(meet)   # once per fill, not again while it stays full
+  inp.lane_mode = False
+  run(m, inp, 2.0)
+  m.hold = None
+  inp.lane_mode = True
+  m.update(0.05, inp)
+  assert m.hold is None                                  # lane mode flipping back soon: no second glance
+  assert m.lane_meet_at - start == pytest.approx(meet)
+  run(m, inp, 1.5)
+  assert m.lane_meet_at - start > meet + 2               # the new fill has its own burst
+
+
+def test_no_lane_mode_glance_while_another_reaction_plays(m):
+  inp = FaceInputs(session=1, v_ego=20.0, engaged=True)
+  run(m, inp, 8.0)
+  m.react('cutin')
+  m.hold = None
+  inp.lane_mode = True
+  m.update(0.05, inp)
+  assert m.lane_mode and (m.hold is None or m.hold[1] <= 0.4)

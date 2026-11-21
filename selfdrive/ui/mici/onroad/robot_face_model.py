@@ -134,6 +134,7 @@ class FaceInputs:
   seatbelt_off: bool = False
   override: bool = False      # the driver is turning the wheel (steeringPressed)
   set_speed: float = 0.0      # cruise set speed, km/h (0 = not set)
+  lane_mode: bool = False     # controlsState.activeLaneLine: steering follows the lane lines (lane mode, not laneless)
 
 
 @dataclass
@@ -242,6 +243,11 @@ class FaceModel:
   SPEED_SHOW_S = 2.4          # the set speed stays up this long after it appears or changes
   SPEED_AFTER_ENGAGE_S = 0.9  # on engagement it waits for the star-eyed hop
   SPEED_CUT = ('brake', 'dm', 'bsm', 'disengage', 'seatbelt')   # these need the eyes: the number makes way at once
+  # Lane mode fills its wheel with colour from its hands (P['lane'] 0 empty .. 1 full): the two fronts running toward
+  # 12 o'clock meet at LANE_MEET, with a little burst there. On the way in it grips tighter and, unless something else
+  # is playing, glances down at the wheel with a nod (at most once per LANE_GLANCE_S).
+  LANE_MEET = 0.7
+  LANE_GLANCE_S = 8.0
 
   def __init__(self, rng: random.Random | None = None):
     self.rng = rng or random.Random()
@@ -253,7 +259,7 @@ class FaceModel:
                           ('low', 0, 210, 0.76), ('smile', 0, 180, 0.64), ('sag', 0, 110, 0.8), ('asym', 0, 110, 0.68),
                           ('blush', 0, 26, 1), ('mO', 0, 190, 0.58), ('green', 0, 18, 1), ('amber', 0, 24, 1),
                           ('flash', 0, 80, 1), ('bright', 1, 12, 1), ('red', 0, 60, 1),
-                          ('drive', 0, 30, 0.85), ('hands', 0, 70, 0.7),
+                          ('drive', 0, 30, 0.85), ('hands', 0, 70, 0.7), ('lane', 0, 16, 0.8), ('grip', 0, 120, 0.42),
                           ('gxL', 0, 760, 0.58), ('gyL', 0, 760, 0.6), ('gxR', 0, 690, 0.58), ('gyR', 0, 690, 0.6),
                           ('wL', 0, 320, 0.8), ('wR', 0, 320, 0.8),
                           ('hx', 0, 52, 0.62), ('hy', 0, 72, 0.4), ('rot', 0, 56, 0.55), ('pitch', 0, 90, 0.45),
@@ -272,7 +278,7 @@ class FaceModel:
 
   # ---- state ------------------------------------------------------------------------
   def reset(self) -> None:
-    for name in ('up', 'tilt', 'low', 'smile', 'sag', 'asym', 'blush', 'mO', 'green', 'amber', 'red', 'flash', 'drive', 'hands',
+    for name in ('up', 'tilt', 'low', 'smile', 'sag', 'asym', 'blush', 'mO', 'green', 'amber', 'red', 'flash', 'drive', 'hands', 'lane', 'grip',
                  'ex', 'ey', 'er', 'pitch', 'wL', 'wR', 'p_shades', 'p_quest', 'p_bulb', 'p_nightcap', 'p_phones', 'p_beacon',
                  'p_whistle', 'p_buckle'):
       self.P[name].t = 0.0
@@ -309,6 +315,10 @@ class FaceModel:
     self.hazard = False
     self.gear = ''
     self.override = False
+    self.lane_mode = False
+    self.lane_prev = 0.0
+    self.lane_meet_at = -1e9   # when the fill's two fronts last met at 12 o'clock
+    self.lane_glance_at = -1e9
     self.set_speed = 0.0
     self.music_on = False
     self.beat_at = -1e9
@@ -529,6 +539,7 @@ class FaceModel:
         self.want('steer_back', 0, 1.5)
       self.handed_over = False
     self.slow_steer = inp.slow_steer
+    self._lane_mode(inp)
     if inp.gas and not self.gas and self.engaged and inp.v_ego > 2 and not self.signal:
       self.want('gas', 0, 1.0)
     self.gas = inp.gas
@@ -544,6 +555,22 @@ class FaceModel:
       until, arg = self.pending[name]
       if self.clock > until or self.event(name, arg):
         del self.pending[name]
+
+  def _lane_mode(self, inp: FaceInputs) -> None:
+    """Lane mode while it drives: the wheel fills with colour (drawn from P['lane']); laneless: it empties again."""
+    lane = bool(inp.lane_mode and self.engaged)
+    if lane != self.lane_mode:
+      self.lane_mode = lane
+      self.kick('grip', 12.0 if lane else -5.0)        # a firmer grip as it fills, a looser one as it empties
+      if lane and self.clock >= self.lane_glance_at and self.clock >= self.event_until and not self.sleep_stage \
+         and not self.signal and not self.dm and not inp.lane_phase:
+        self.lane_glance_at = self.clock + self.LANE_GLANCE_S
+        self.look(0.0, 0.55, 0.45)                      # a glance down at the wheel
+        self.kick('hy', 45)                             # and a little nod
+    v = self.P['lane'].v
+    if lane and v >= self.LANE_MEET > self.lane_prev:
+      self.lane_meet_at = self.clock
+    self.lane_prev = v
 
   def _music(self, dt: float, inp: FaceInputs) -> None:
     """Dance to music (the phone's, or what the microphone hears) when nothing else is going on (as in the web preview)."""
@@ -1384,6 +1411,7 @@ class FaceModel:
     # driving: the wheel rises from the bottom edge and its hands hold it, except while the driver has it
     P['drive'].t = 1.0 if self.engaged else 0.0
     P['hands'].t = 1.0 if self.engaged and not self.handed_over and self.clock >= self.hands_off_until else 0.0
+    P['lane'].t = 1.0 if self.lane_mode else 0.0
     steps = max(1, math.ceil(dt / (1 / 120)))     # 120 Hz is stable for the stiffest spring (k 760) and halves the cost
     for _ in range(steps):
       for s in P.values():
