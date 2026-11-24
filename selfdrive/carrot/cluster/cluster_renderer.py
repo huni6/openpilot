@@ -194,23 +194,31 @@ AMBIENT_BSM_LIGHT_CORE_ALPHA = 125.0
 AMBIENT_BSM_FADE_SECONDS = 0.35
 AMBIENT_LFA_ACTIVE_COLOR = (46, 192, 79)
 AMBIENT_LFA_INACTIVE_COLOR = (126, 135, 148)
-# the comma's current alert in a box at the top centre, under the drive status row (speed limit .. lane assist icon,
-# whose middle is about x 905) and clear of the speed (ends near x 470) and the phone media panel (x 1379): its first
-# line big, the second (when the alert has one) smaller under it. The box's top stays put; two lines grow it down.
+# the comma's current alert as text in the open middle of the screen, under the drive status row (speed limit .. lane
+# assist icon, whose middle is about x 905) and clear of the speed (ends near x 470) and the phone media panel
+# (x 1379): no box, the first line big and tinted by level, the second (when the alert has one) grey under it, and a
+# soft glow of the level colour behind them
 AMBIENT_EVENT_CENTER_X = 905.0
-AMBIENT_EVENT_TOP = 172.0
+AMBIENT_EVENT_TITLE_Y = 270.0       # one line
+AMBIENT_EVENT_TITLE_Y_TWO = 250.0   # two lines: the title moves up
+AMBIENT_EVENT_DETAIL_DY = 54.0      # from the title's middle to the second line's
+AMBIENT_EVENT_TEXT_SIZE = 58.0
+AMBIENT_EVENT_DETAIL_SIZE = 38.0
 AMBIENT_EVENT_MAX_W = 840.0
-AMBIENT_EVENT_PAD_X = 34.0
-AMBIENT_EVENT_PAD_Y = 12.0
-AMBIENT_EVENT_TEXT_SIZE = 50.0
-AMBIENT_EVENT_DETAIL_SIZE = 36.0
-AMBIENT_EVENT_LINE_GAP = 4.0
-AMBIENT_EVENT_RADIUS = 30.0
-AMBIENT_EVENT_DETAIL_COLOR = (209, 213, 219)
+AMBIENT_EVENT_GLOW_R = 120.0
+AMBIENT_EVENT_GLOW_STRETCH = 3.2    # the glow is this much wider than tall
+AMBIENT_EVENT_GLOW_ALPHA = 46.0
+AMBIENT_EVENT_GLOW_PULSE = 30.0     # extra glow alpha at the top of a critical alert's pulse
+AMBIENT_EVENT_TITLE_COLORS = {
+    "info": (245, 247, 250),       # white
+    "warning": (255, 196, 84),     # amber: the comma asks for something
+    "critical": (255, 104, 92),    # red: take over
+}
+AMBIENT_EVENT_DETAIL_COLOR = (190, 196, 205)
 AMBIENT_EVENT_SLIDE_PX = 10.0      # a new alert slides down into place this far
 AMBIENT_EVENT_SLIDE_S = 0.25
-AMBIENT_EVENT_FONT_SIZES = (96, 128, 72)  # glyph atlas sizes to try; the text is drawn at 50 and 36
-AMBIENT_EVENT_COLORS = {
+AMBIENT_EVENT_FONT_SIZES = (96, 128, 72)  # glyph atlas sizes to try; the text is drawn at 58 and 38
+AMBIENT_EVENT_COLORS = {          # the glow behind the text
     "info": (96, 165, 250),        # blue
     "warning": (255, 176, 40),     # amber: the comma asks for something
     "critical": (255, 72, 64),     # red: take over
@@ -2797,9 +2805,10 @@ class ClusterUiRenderer:
         self._draw_ambient_gap_bars(state)
 
     def _draw_ambient_event(self, state: ClusterUiState) -> None:
-        """The comma's current alert in a box at the top centre: its first line, and its second line smaller under it
-        when it has one, centred; the box tinted by level (blue info, amber asks for something, red take over; red
-        pulses). Fades and slides in, and stays a moment after the alert goes (AmbientEventFade)."""
+        """The comma's current alert as text in the middle of the screen: its first line big, tinted by level (white
+        info, amber asks for something, red take over), its second line grey under it when it has one, and a soft glow
+        of the level colour behind (a critical one pulses). Fades and slides in, and stays a moment after the alert
+        goes (AmbientEventFade)."""
         now = time.monotonic()
         elapsed = 1.0 / 30.0 if self._ambient_event_updated_at is None else now - self._ambient_event_updated_at
         self._ambient_event_updated_at = now
@@ -2807,37 +2816,33 @@ class ClusterUiRenderer:
         alpha = event.opacity
         if alpha <= 0.0 or not event.text:
             return
-        accent = AMBIENT_EVENT_COLORS.get(event.level, AMBIENT_EVENT_COLORS["info"])
+        glow = AMBIENT_EVENT_COLORS.get(event.level, AMBIENT_EVENT_COLORS["info"])
+        title_color = AMBIENT_EVENT_TITLE_COLORS.get(event.level, AMBIENT_EVENT_TITLE_COLORS["info"])
         unicode_font = self._event_font_for(f"{event.text} {event.detail}")
         title_font = unicode_font or self._ambient_font("semibold")
         detail_font = unicode_font or self._ambient_font("regular")
-        max_text_w = AMBIENT_EVENT_MAX_W - 2.0 * AMBIENT_EVENT_PAD_X
-        title = self._ellipsize_ambient_text(event.text, AMBIENT_EVENT_TEXT_SIZE, max_text_w, "semibold", title_font)
-        title_w, _ = self._measure_text_with_font(title_font, title, AMBIENT_EVENT_TEXT_SIZE, 0.0)
+        title = self._ellipsize_ambient_text(event.text, AMBIENT_EVENT_TEXT_SIZE, AMBIENT_EVENT_MAX_W, "semibold", title_font)
         detail = ""
-        detail_w = 0.0
         if event.detail:
-            detail = self._ellipsize_ambient_text(event.detail, AMBIENT_EVENT_DETAIL_SIZE, max_text_w, "regular", detail_font)
-            detail_w, _ = self._measure_text_with_font(detail_font, detail, AMBIENT_EVENT_DETAIL_SIZE, 0.0)
-        width = max(title_w, detail_w) + 2.0 * AMBIENT_EVENT_PAD_X
-        height = 2.0 * AMBIENT_EVENT_PAD_Y + AMBIENT_EVENT_TEXT_SIZE
-        if detail:
-            height += AMBIENT_EVENT_LINE_GAP + AMBIENT_EVENT_DETAIL_SIZE
+            detail = self._ellipsize_ambient_text(event.detail, AMBIENT_EVENT_DETAIL_SIZE, AMBIENT_EVENT_MAX_W, "regular", detail_font)
         slide = 1.0 - clamp(event.since / AMBIENT_EVENT_SLIDE_S, 0.0, 1.0)
-        top = AMBIENT_EVENT_TOP - AMBIENT_EVENT_SLIDE_PX * slide * slide
-        rect = rl.Rectangle(AMBIENT_EVENT_CENTER_X - width * 0.5, top, width, height)
-        roundness = min(1.0, 2.0 * AMBIENT_EVENT_RADIUS / height)
+        title_y = (AMBIENT_EVENT_TITLE_Y_TWO if detail else AMBIENT_EVENT_TITLE_Y) - AMBIENT_EVENT_SLIDE_PX * slide * slide
+        glow_y = title_y + (AMBIENT_EVENT_DETAIL_DY * 0.4 if detail else 0.0)
         pulse = 0.5 + 0.5 * math.sin(now * 6.0) if event.level == "critical" else 0.0
-        fill_alpha = (60.0 + 40.0 * pulse) if event.level == "critical" else 34.0
-        rl.draw_rectangle_rounded(rect, roundness, 24, rl_color(accent, int(fill_alpha * alpha)))
-        self._draw_rounded_rect_lines_safe(rect, roundness, 24, 2.0, rl_color(accent, int((150.0 + 80.0 * pulse) * alpha)))
-        title_y = top + AMBIENT_EVENT_PAD_Y + AMBIENT_EVENT_TEXT_SIZE * 0.5
+        glow_alpha = int((AMBIENT_EVENT_GLOW_ALPHA + AMBIENT_EVENT_GLOW_PULSE * pulse) * alpha)
+        rl.rl_push_matrix()
+        try:
+            rl.rl_translatef(AMBIENT_EVENT_CENTER_X, glow_y, 0.0)
+            rl.rl_scalef(AMBIENT_EVENT_GLOW_STRETCH, 1.0, 1.0)
+            rl.draw_circle_gradient(0, 0, AMBIENT_EVENT_GLOW_R, rl_color(glow, glow_alpha), rl_color(glow, 0))
+        finally:
+            rl.rl_pop_matrix()
         self._draw_ambient_text(
             title,
             AMBIENT_EVENT_CENTER_X,
             title_y,
             AMBIENT_EVENT_TEXT_SIZE,
-            (255, 255, 255, int(245 * alpha)),
+            (*title_color, int(250 * alpha)),
             weight="semibold",
             anchor="center",
             font_override=title_font,
@@ -2846,7 +2851,7 @@ class ClusterUiRenderer:
             self._draw_ambient_text(
                 detail,
                 AMBIENT_EVENT_CENTER_X,
-                title_y + AMBIENT_EVENT_TEXT_SIZE * 0.5 + AMBIENT_EVENT_LINE_GAP + AMBIENT_EVENT_DETAIL_SIZE * 0.5,
+                title_y + AMBIENT_EVENT_DETAIL_DY,
                 AMBIENT_EVENT_DETAIL_SIZE,
                 (*AMBIENT_EVENT_DETAIL_COLOR, int(235 * alpha)),
                 weight="regular",
