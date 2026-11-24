@@ -201,8 +201,6 @@ AMBIENT_EVENT_Y = 214.0
 AMBIENT_EVENT_H = 56.0
 AMBIENT_EVENT_MAX_W = 780.0
 AMBIENT_EVENT_PAD_X = 26.0
-AMBIENT_EVENT_DOT_R = 7.0
-AMBIENT_EVENT_DOT_GAP = 22.0       # from the dot's centre to the text
 AMBIENT_EVENT_TEXT_SIZE = 34.0
 AMBIENT_EVENT_SLIDE_PX = 10.0      # a new alert slides down into place this far
 AMBIENT_EVENT_SLIDE_S = 0.25
@@ -2794,8 +2792,8 @@ class ClusterUiRenderer:
         self._draw_ambient_gap_bars(state)
 
     def _draw_ambient_event(self, state: ClusterUiState) -> None:
-        """The comma's current alert in a pill at the top centre: a coloured dot and one line of text, tinted by level
-        (blue info, amber asks for something, red take over; red pulses). Fades and slides in, and stays a moment after
+        """The comma's current alert in a pill at the top centre: one line of text, the pill tinted by level (blue
+        info, amber asks for something, red take over; red pulses). Fades and slides in, and stays a moment after
         the alert goes (AmbientEventFade)."""
         now = time.monotonic()
         elapsed = 1.0 / 30.0 if self._ambient_event_updated_at is None else now - self._ambient_event_updated_at
@@ -2806,10 +2804,10 @@ class ClusterUiRenderer:
             return
         accent = AMBIENT_EVENT_COLORS.get(event.level, AMBIENT_EVENT_COLORS["info"])
         font = self._event_font_for(event.text) or self._ambient_font("semibold")
-        max_text_w = AMBIENT_EVENT_MAX_W - 2.0 * AMBIENT_EVENT_PAD_X - AMBIENT_EVENT_DOT_GAP
+        max_text_w = AMBIENT_EVENT_MAX_W - 2.0 * AMBIENT_EVENT_PAD_X
         text = self._ellipsize_ambient_text(event.text, AMBIENT_EVENT_TEXT_SIZE, max_text_w, "semibold", font)
         text_w, _ = self._measure_text_with_font(font, text, AMBIENT_EVENT_TEXT_SIZE, 0.0)
-        width = text_w + 2.0 * AMBIENT_EVENT_PAD_X + AMBIENT_EVENT_DOT_GAP
+        width = text_w + 2.0 * AMBIENT_EVENT_PAD_X
         slide = 1.0 - clamp(event.since / AMBIENT_EVENT_SLIDE_S, 0.0, 1.0)
         center_y = AMBIENT_EVENT_Y - AMBIENT_EVENT_SLIDE_PX * slide * slide
         left = AMBIENT_EVENT_CENTER_X - width * 0.5
@@ -2818,11 +2816,9 @@ class ClusterUiRenderer:
         fill_alpha = (60.0 + 40.0 * pulse) if event.level == "critical" else 34.0
         rl.draw_rectangle_rounded(rect, 1.0, 24, rl_color(accent, int(fill_alpha * alpha)))
         self._draw_rounded_rect_lines_safe(rect, 1.0, 24, 2.0, rl_color(accent, int((150.0 + 80.0 * pulse) * alpha)))
-        dot_x = left + AMBIENT_EVENT_PAD_X + AMBIENT_EVENT_DOT_R * 0.5
-        rl.draw_circle_v(rl.Vector2(dot_x, center_y), AMBIENT_EVENT_DOT_R, rl_color(accent, int(255 * alpha)))
         self._draw_ambient_text(
             text,
-            left + AMBIENT_EVENT_PAD_X + AMBIENT_EVENT_DOT_GAP,
+            left + AMBIENT_EVENT_PAD_X,
             center_y,
             AMBIENT_EVENT_TEXT_SIZE,
             (255, 255, 255, int(245 * alpha)),
