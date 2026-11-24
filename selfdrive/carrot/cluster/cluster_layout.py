@@ -104,3 +104,51 @@ def smooth_bsm_opacity(
   if target > value:
     return min(target, value + step)
   return max(target, value - step)
+
+
+def cluster_event_from_alert(text1: object, text2: object, status: object, size: object) -> tuple[str, str]:
+  """The comma's current alert (selfdriveState) as one short line and a level for the cluster's event line:
+  alertText1, or alertText2 when that is all there is, whitespace collapsed; ("", "") while no alert is up."""
+  if str(size or "none") == "none":
+    return "", ""
+  text = " ".join(str(text1 or "").split()) or " ".join(str(text2 or "").split())
+  if not text:
+    return "", ""
+  status_name = str(status or "normal")
+  level = "critical" if status_name == "critical" else "warning" if status_name == "userPrompt" else "info"
+  return text, level
+
+
+class AmbientEventFade:
+  """What the cluster's event line shows and how strongly. A new alert comes in over fade_in_s; it stays while the
+  alert is up and for hold_s after it goes (an alert that drops out for a frame does not flicker), then fades out
+  over fade_out_s. A different alert replaces the text at once and pops in again from part strength. `since` counts
+  the seconds since the shown text appeared."""
+
+  def __init__(self, fade_in_s: float = 0.18, fade_out_s: float = 0.35, hold_s: float = 0.5):
+    self.fade_in_s = fade_in_s
+    self.fade_out_s = fade_out_s
+    self.hold_s = hold_s
+    self.text = ""
+    self.level = ""
+    self.opacity = 0.0
+    self.since = 0.0
+    self._gone_for = 0.0
+
+  def update(self, text: str, level: str, elapsed_seconds: float) -> AmbientEventFade:
+    dt = _clamp(float(elapsed_seconds) if math.isfinite(elapsed_seconds) else 0.0, 0.0, 0.5)
+    if text:
+      self._gone_for = 0.0
+      if text != self.text or level != self.level:
+        if self.text:
+          self.opacity = min(self.opacity, 0.35)
+        self.text, self.level, self.since = text, level, 0.0
+      self.opacity = 1.0 if self.fade_in_s <= 0.0 else min(1.0, self.opacity + dt / self.fade_in_s)
+    elif self.text:
+      self._gone_for += dt
+      if self._gone_for > self.hold_s:
+        self.opacity = 0.0 if self.fade_out_s <= 0.0 else max(0.0, self.opacity - dt / self.fade_out_s)
+        if self.opacity <= 0.0:
+          self.text, self.level = "", ""
+    self.since += dt
+    return self
