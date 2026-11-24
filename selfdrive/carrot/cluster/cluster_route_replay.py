@@ -230,7 +230,8 @@ class RouteReplayFrame:
     lateral_plan_debug_text: str | None = None
     lateral_plan_curvatures: tuple[float, ...] = ()
     lateral_plan_curvature_rates: tuple[float, ...] = ()
-    event_text: str = ""   # the comma's current alert, one line (cluster_layout.cluster_event_from_alert)
+    event_text: str = ""   # the comma's current alert: first line (cluster_layout.cluster_event_from_alert)
+    event_detail: str = ""  # and its second line, when it has one
     event_level: str = ""  # info / warning / critical
 
 
@@ -907,6 +908,7 @@ class RouteLogParser:
         self.cruise_kph: int | None = None
         self.cruise_gap: int | None = None
         self.event_text = ""
+        self.event_detail = ""
         self.event_level = ""
         self.lfa_active: bool | None = None
         self.controls_enabled: bool | None = None
@@ -1230,6 +1232,7 @@ class RouteLogParser:
             lateral_plan_curvatures=self.lateral_plan_curvatures,
             lateral_plan_curvature_rates=self.lateral_plan_curvature_rates,
             event_text=self.event_text,
+            event_detail=self.event_detail,
             event_level=self.event_level,
         )
 
@@ -1451,7 +1454,7 @@ class RouteLogParser:
         if cruise_gap is not None:
             self.cruise_gap = cruise_gap
         # the alert the comma is showing now, for the event line at the top centre
-        self.event_text, self.event_level = cluster_event_from_alert(
+        self.event_text, self.event_detail, self.event_level = cluster_event_from_alert(
             safe_get(selfdrive_state, "alertText1", ""),
             safe_get(selfdrive_state, "alertText2", ""),
             safe_get(selfdrive_state, "alertStatus", "normal"),
@@ -2247,6 +2250,7 @@ def frame_to_state(frame: RouteReplayFrame) -> ClusterUiState:
         lateral_plan_curvatures=frame.lateral_plan_curvatures,
         lateral_plan_curvature_rates=frame.lateral_plan_curvature_rates,
         event_text=frame.event_text,
+        event_detail=frame.event_detail,
         event_level=frame.event_level,
         display_speed_kph=frame.display_speed_kph,
     )
@@ -2435,6 +2439,7 @@ def blend_frames(left: RouteReplayFrame, right: RouteReplayFrame, amount: float)
         lateral_plan_curvatures=discrete.lateral_plan_curvatures,
         lateral_plan_curvature_rates=discrete.lateral_plan_curvature_rates,
         event_text=discrete.event_text,
+        event_detail=discrete.event_detail,
         event_level=discrete.event_level,
     )
 

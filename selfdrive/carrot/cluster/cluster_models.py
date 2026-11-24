@@ -306,7 +306,8 @@ class ClusterUiState:
     git_status: GitBranchStatus | None = None
     actual_fps: float | None = None
     cluster_core_usage_text: str | None = None
-    event_text: str = ""   # the comma's current alert, one line (cluster_layout.cluster_event_from_alert)
+    event_text: str = ""   # the comma's current alert: first line (cluster_layout.cluster_event_from_alert)
+    event_detail: str = ""  # and its second line, when it has one
     event_level: str = ""  # info / warning / critical
 
 
