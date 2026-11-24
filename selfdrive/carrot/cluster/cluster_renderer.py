@@ -17,6 +17,9 @@ from pathlib import Path
 import pyray as rl
 
 from cluster_config import (
+    CLUSTER_DISPLAY_MODE_DEFAULT,
+    cluster_display_shows_events,
+    normalize_cluster_display_mode,
     AMBER,
     BLUE,
     BLUE_SOFT,
@@ -685,6 +688,7 @@ class ClusterUiRenderer:
         target_fps: int = 0,
         theme_mode: str = "auto",
         screen_mode: int = 0,
+        display_mode: int = CLUSTER_DISPLAY_MODE_DEFAULT,
     ) -> None:
         self.width = width
         self.height = height
@@ -692,6 +696,7 @@ class ClusterUiRenderer:
         self.target_fps = target_fps
         self.theme_mode = normalize_cluster_theme_mode(theme_mode)
         self.screen_mode = normalize_cluster_screen_mode(screen_mode)
+        self.display_mode = normalize_cluster_display_mode(display_mode)
         self._theme = current_cluster_theme(self.theme_mode)
         self.hidden = False
         self._window_open = False
@@ -777,6 +782,11 @@ class ClusterUiRenderer:
     def set_theme_mode(self, theme_mode: str) -> None:
         self.theme_mode = normalize_cluster_theme_mode(theme_mode)
         self._theme = current_cluster_theme(self.theme_mode)
+
+    def set_display_mode(self, display_mode: int) -> None:
+        """ClusterHudDisplayMode: 1 the ambient screen as it was, 2-6 also the comma's current alert (0, off, never
+        reaches the renderer: the HUD stops and the panel goes dark)."""
+        self.display_mode = normalize_cluster_display_mode(display_mode)
 
     def set_screen_mode(self, screen_mode: int) -> None:
         self.screen_mode = normalize_cluster_screen_mode(screen_mode)
@@ -2567,7 +2577,8 @@ class ClusterUiRenderer:
             self._draw_ambient_step("power_meter", lambda: self._draw_ambient_power_meter(state))
             self._draw_ambient_step("speed", lambda: self._draw_ambient_speed(state))
             self._draw_ambient_step("drive_status", lambda: self._draw_ambient_drive_status(state))
-            self._draw_ambient_step("event", lambda: self._draw_ambient_event(state))
+            if cluster_display_shows_events(self.display_mode):
+                self._draw_ambient_step("event", lambda: self._draw_ambient_event(state))
             self._draw_ambient_step("clock", lambda: self._draw_ambient_clock(state))
             self._draw_ambient_step("phone_media", lambda: self._draw_phone_media_panel(state.phone_media, ambient=True))
             self._draw_ambient_step("bsm_edges", lambda: self._draw_ambient_bsm_edges(state))

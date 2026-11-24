@@ -17,6 +17,8 @@ from cluster_config import (
     CLUSTER_ENCODER_PARAM,
     CLUSTER_ENCODER_SOFTWARE,
     CLUSTER_CORE_MODE_PARAM,
+    CLUSTER_DISPLAY_MODE_OFF,
+    CLUSTER_DISPLAY_MODE_PARAM,
     CLUSTER_HUD_DEBUG_PARAM,
     CLUSTER_HUD_PARAM,
     CLUSTER_LIVE_FPS_PARAM,
@@ -38,6 +40,7 @@ from cluster_config import (
     normalize_cluster_brightness_percent,
     normalize_cluster_camera_view_mode,
     normalize_cluster_core_mode,
+    normalize_cluster_display_mode,
     normalize_cluster_encoder_mode,
     normalize_cluster_live_fps,
     normalize_cluster_priority,
@@ -347,6 +350,30 @@ class ClusterHudModeParamReader:
             return None
 
 
+def read_cluster_display_mode(params) -> int:
+    """ClusterHudDisplayMode (0-6, default 1); the default when Params is not there (a Mac run) or cannot be read."""
+    if params is None:
+        return normalize_cluster_display_mode(None)
+    try:
+        return normalize_cluster_display_mode(params.get_int(CLUSTER_DISPLAY_MODE_PARAM))
+    except Exception:
+        return normalize_cluster_display_mode(None)
+
+
+class ClusterDisplayModeParamReader:
+    def __init__(self) -> None:
+        self._params = None
+        try:
+            from openpilot.common.params import Params
+
+            self._params = Params()
+        except Exception:
+            pass
+
+    def read(self) -> int:
+        return read_cluster_display_mode(self._params)
+
+
 class ClusterHudOutputGateParamReader:
     def __init__(self) -> None:
         self._params = None
@@ -365,10 +392,16 @@ class ClusterHudOutputGateParamReader:
         except Exception:
             return 0
 
+    def display_off(self) -> bool:
+        """ClusterHudDisplayMode 0: the HUD shows nothing and the panel stays dark."""
+        return read_cluster_display_mode(self._params) == CLUSTER_DISPLAY_MODE_OFF
+
     def allowed(self) -> bool:
         if self._params is None:
             return True
         try:
+            if self.display_off():
+                return False
             return self.read_mode() >= 1 or bool(self._params.get_bool("IsOnroad"))
         except Exception:
             return False
@@ -522,6 +555,7 @@ def run_demo(
     hud_encoder_watch: int | None,
     hud_core_mode_watch: int | None,
     hud_priority_watch: int | None,
+    display_mode_override: int | None = None,
 ) -> None:
     if hud_core_mode_watch is not None:
         hud_core_mode_watch = normalize_cluster_core_mode(hud_core_mode_watch)
@@ -605,6 +639,12 @@ def run_demo(
     active_theme_mode = theme_override or (theme_param_reader.read() if theme_param_reader is not None else "auto")
     screen_mode_param_reader = ClusterScreenModeParamReader()
     active_screen_mode = screen_mode_param_reader.read()
+    display_mode_param_reader = ClusterDisplayModeParamReader() if display_mode_override is None else None
+    active_display_mode = (
+        normalize_cluster_display_mode(display_mode_override)
+        if display_mode_param_reader is None
+        else display_mode_param_reader.read()
+    )
     effective_screen_mode = CLUSTER_SCREEN_MODE_DEFAULT
     camera_view_param_reader = ClusterCameraViewModeParamReader()
     active_camera_view_mode = camera_view_param_reader.read()
@@ -626,6 +666,7 @@ def run_demo(
         frame_height,
         target_fps=max(0, int(round(target_fps))),
         theme_mode=active_theme_mode,
+        display_mode=active_display_mode,
         screen_mode=effective_screen_mode,
     )
     print(
@@ -691,8 +732,9 @@ def run_demo(
 
     if hud_output_gate_param_reader is not None and not hud_output_gate_param_reader.allowed():
         print(
-            f"{CLUSTER_HUD_DEBUG_PARAM}=0 and IsOnroad=0; "
-            "cluster HUD output remains off",
+            f"{CLUSTER_DISPLAY_MODE_PARAM}=0; cluster HUD output remains off"
+            if hud_output_gate_param_reader.display_off()
+            else f"{CLUSTER_HUD_DEBUG_PARAM}=0 and IsOnroad=0; cluster HUD output remains off",
             flush=True,
         )
         return
@@ -793,6 +835,12 @@ def run_demo(
                 if next_theme_mode != renderer.theme_mode:
                     renderer.set_theme_mode(next_theme_mode)
                 next_theme_param_read = now + THEME_PARAM_POLL_SECONDS
+            if now >= next_screen_mode_param_read and display_mode_param_reader is not None:
+                next_display_mode = display_mode_param_reader.read()
+                if next_display_mode != active_display_mode:
+                    print(f"{CLUSTER_DISPLAY_MODE_PARAM} updated: {active_display_mode} -> {next_display_mode}", flush=True)
+                    active_display_mode = next_display_mode
+                    renderer.set_display_mode(active_display_mode)
             if now >= next_screen_mode_param_read:
                 next_screen_mode = screen_mode_param_reader.read()
                 if next_screen_mode != active_screen_mode:
@@ -900,8 +948,9 @@ def run_demo(
                             live_source.set_hud_debug_mode(active_hud_debug_mode)
                 if hud_output_gate_param_reader is not None and not hud_output_gate_param_reader.allowed():
                     print(
-                        f"{CLUSTER_HUD_DEBUG_PARAM}=0 and IsOnroad=0; "
-                        "exiting to turn off cluster HUD output",
+                        f"{CLUSTER_DISPLAY_MODE_PARAM}=0; exiting to turn off cluster HUD output"
+                        if hud_output_gate_param_reader.display_off()
+                        else f"{CLUSTER_HUD_DEBUG_PARAM}=0 and IsOnroad=0; exiting to turn off cluster HUD output",
                         flush=True,
                     )
                     break
@@ -1497,6 +1546,13 @@ def parse_args() -> argparse.Namespace:
         help=f"HUD theme override. Default reads {CLUSTER_THEME_PARAM}: 0 auto, 1 dark, 2 light.",
     )
     parser.add_argument(
+        "--display-mode",
+        type=int,
+        choices=range(7),
+        default=None,
+        help=f"What the HUD shows, overriding {CLUSTER_DISPLAY_MODE_PARAM}: 1 the ambient screen, 2-6 also the comma's alert.",
+    )
+    parser.add_argument(
         "--cluster-hud-mode",
         type=int,
         default=None,
@@ -1791,6 +1847,7 @@ def main(*, exit_on_error: bool = True) -> None:
             args.cluster_hud_encoder,
             args.cluster_hud_core_mode,
             args.cluster_hud_priority,
+            display_mode_override=args.display_mode,
         )
     except KeyboardInterrupt:
         print("\nStopped.")

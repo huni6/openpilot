@@ -1,7 +1,22 @@
 # 외장 9.2인치 HUD: 중앙 상단 이벤트 표시 (2026-11-24)
 
-TURZX 외장 HUD(`ClusterHud` 1·2)의 기본 화면(앰비언트)에 콤마의 현재 경고를 띄운다. 두 줄짜리 경고는 두 줄 다 띄운다.
+TURZX 외장 HUD(`ClusterHud` 1·2)의 기본 화면(앰비언트)에 콤마의 현재 경고를 띄운다(`ClusterHudDisplayMode` 2~6). 두 줄짜리 경고는 두 줄 다 띄운다.
 화면 표시만 바꾸며, 경고 판단·소리·주행 제어는 그대로다.
+
+## 설정: 외부 HUD 표시 모드 (`ClusterHudDisplayMode`, 0~6, 기본 1)
+
+당근웹 → 설정 → 화면 → 외부 HUD → 기본 항목에서 고른다. 바꾸면 1초 안에 적용되고 재부팅은 필요 없다.
+
+| 값 | 화면 |
+|---|---|
+| 0 | 끄기. 외부 HUD 화면이 꺼진다. 시동이 꺼졌을 때와 같은 방식으로, HUD 프로세스가 내려가고 자동 실행기가 패널을 어둡게 둔다. 다시 1 이상으로 바꾸면 몇 초 안에 켜진다. |
+| 1 | 기본 화면(이벤트 표시 전 그대로) |
+| 2 | 기본 화면 + 콤마 이벤트(아래 "보이는 것") |
+| 3~6 | 나중에 만들 화면용 자리. 지금은 2와 같다. |
+
+- `ClusterHud`(0 끄기 / 1 9.2인치 / 2 12.3인치)는 그대로다. HUD를 쓸지와 패널 종류는 여전히 `ClusterHud`로 정한다.
+- 기본값을 1로 둔 이유: 이 설정이 생기기 전 화면과 같게 하려고. EV6에서 이벤트를 보려면 2로 바꾼다.
+- 값이 없거나 읽지 못하면 1로 본다. 새 설정 키를 모르는 예전 params 빌드도 1로 동작한다.
 
 ## 보이는 것
 
@@ -59,7 +74,10 @@ EV6(cluster_egpu, 한글 comma 4)가 띄울 수 있는 경고 163개를 실제 �
 
 ## 검증한 것과 못 한 것
 
-- 맥 테스트: 외장 화면 테스트 23개(이벤트 테스트 10개 포함)와 젯슨 패널 출력 테스트 9개가 통과했다.
+- 맥 테스트: 외장 화면 테스트 28개(이벤트 10개, 표시 모드 5개 포함)와 젯슨 패널 출력 테스트 9개가 통과했다.
+- 표시 모드: 모드 1·2·4로 실제 로그를 렌더해 1에서는 이벤트가 안 뜨고 2·4에서는 뜨는 것을 확인했다.
+  모드 0은 자동 실행기(`_hud_output_allowed`)와 메인(`ClusterHudOutputGateParamReader`) 둘 다 출력을 막는 것을 가짜 Params로 확인했다.
+  당근웹 설정 목록에서 외부 HUD → 기본 항목에 들어가는 것을 서버 코드로 확인했다(브라우저 화면은 안 봄).
 - 맥 렌더: 실제 주행 로그로, 9.2인치 패널에 보내는 프레임(1920×462)을 그대로 받아 확인했다.
   - 트래버스 `0000023f--ff2039c594--3`: "전방 주의"(주의), "정지합니다"(정보), "조향 보조 꺼짐"(주의)
   - 말리부 `0000001d--c1e04a331d--15`: "브레이크! / 추돌 위험"(위급)과 사라지는 모습
@@ -73,5 +91,7 @@ EV6(cluster_egpu, 한글 comma 4)가 띄울 수 있는 경고 163개를 실제 �
 - `selfdrive/carrot/cluster/cluster_layout.py`: `cluster_event_from_alert`, `AmbientEventFade`
 - `selfdrive/carrot/cluster/cluster_models.py`, `cluster_route_replay.py`: `event_text`·`event_detail`·`event_level`을 `selfdriveState`에서 읽어
   프레임과 화면 상태로 넘김(라이브 입력과 로그 재생이 같은 파서를 씀)
-- `selfdrive/carrot/cluster/cluster_renderer.py`: `_draw_ambient_event`, `_event_font_for`
-- 테스트: `selfdrive/carrot/cluster/tests/test_cluster_event.py`
+- `selfdrive/carrot/cluster/cluster_renderer.py`: `_draw_ambient_event`, `_fit_event_line`, `_event_font_for`, `set_display_mode`
+- 표시 모드: `cluster_config.py`(`CLUSTER_DISPLAY_MODE_*`, `normalize_cluster_display_mode`), `main.py`(`--display-mode`, 1초마다 다시 읽기, 0이면 출력 끔),
+  `selfdrive/carrot/cluster_autorun.py`(0이면 패널 끔), `common/params_keys.h`, `selfdrive/carrot_settings.json`
+- 테스트: `selfdrive/carrot/cluster/tests/test_cluster_event.py`, `test_cluster_display_mode.py`

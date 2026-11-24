@@ -79,6 +79,15 @@ CLUSTER_SCREEN_MODE_DEBUG_GRAPH = 3
 CLUSTER_SCREEN_MODE_DEBUG_GRAPH_RIGHT = 4
 CLUSTER_SCREEN_MODE_NAVI_DEBUG = 5
 CLUSTER_SCREEN_MODE_PARAM = "ClusterHudScreenMode"
+# ClusterHudDisplayMode: what the external HUD shows. 0 off (the panel stays dark, as with ignition off), 1 the
+# ambient screen as it was, 2 that plus the comma's current alert at the top centre; 3-6 are reserved for later
+# screens and show what 2 does for now.
+CLUSTER_DISPLAY_MODE_PARAM = "ClusterHudDisplayMode"
+CLUSTER_DISPLAY_MODE_OFF = 0
+CLUSTER_DISPLAY_MODE_BASIC = 1
+CLUSTER_DISPLAY_MODE_EVENTS = 2
+CLUSTER_DISPLAY_MODE_MAX = 6
+CLUSTER_DISPLAY_MODE_DEFAULT = CLUSTER_DISPLAY_MODE_BASIC
 CLUSTER_RADAR_INFO_NONE = 0
 CLUSTER_RADAR_INFO_VEHICLE_SPEED = 1
 CLUSTER_RADAR_INFO_VEHICLE_SPEED_DISTANCE = 2
@@ -311,6 +320,26 @@ def normalize_cluster_brightness_percent(value: object) -> int:
     except (TypeError, ValueError):
         return 0
     return min(100, max(0, brightness))
+
+
+def normalize_cluster_display_mode(value: object) -> int:
+    """ClusterHudDisplayMode as an int 0-6; anything else (missing, unreadable, out of range) is the default, 1."""
+    if isinstance(value, bytes):
+        value = value.decode("utf-8", "ignore")
+    if isinstance(value, bool):
+        return CLUSTER_DISPLAY_MODE_DEFAULT
+    try:
+        mode = int(str(value).strip()) if isinstance(value, str) else int(value)
+    except (TypeError, ValueError):
+        return CLUSTER_DISPLAY_MODE_DEFAULT
+    if CLUSTER_DISPLAY_MODE_OFF <= mode <= CLUSTER_DISPLAY_MODE_MAX:
+        return mode
+    return CLUSTER_DISPLAY_MODE_DEFAULT
+
+
+def cluster_display_shows_events(mode: int) -> bool:
+    """Modes 2-6 show the comma's current alert (3-6 are reserved and act as 2 for now)."""
+    return normalize_cluster_display_mode(mode) >= CLUSTER_DISPLAY_MODE_EVENTS
 
 
 def normalize_cluster_screen_mode(value: object) -> int:

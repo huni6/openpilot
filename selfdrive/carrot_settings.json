@@ -522,6 +522,7 @@
               "zh": "基本",
               "params": [
                 "ClusterHud",
+                "ClusterHudDisplayMode",
                 "ClusterHudTheme"
               ]
             },
@@ -3140,6 +3141,22 @@
       "min": 0,
       "max": 2,
       "default": 0,
+      "unit": 1
+    },
+    {
+      "group": "외부 HUD",
+      "name": "ClusterHudDisplayMode",
+      "title": "외부 HUD 표시 모드(1)",
+      "descr": "0: 끄기(외부 HUD 화면을 끔)\n1: 기본 화면\n2: 기본 화면 + 콤마 이벤트(가운데 위에 경고 문구)\n3~6: 예정(지금은 2와 같음)",
+      "egroup": "CLUSTER HUD",
+      "etitle": "External HUD Display Mode(1)",
+      "edescr": "0: Off (turns the external HUD screen off)\n1: Basic screen\n2: Basic screen + comma events (the current alert at the top centre)\n3-6: Reserved (same as 2 for now)",
+      "cgroup": "外部 HUD",
+      "ctitle": "外部 HUD 显示模式(1)",
+      "cdescr": "0: 关闭(关闭外部 HUD 屏幕)\n1: 基本画面\n2: 基本画面 + comma 事件(顶部中间显示当前警告)\n3~6: 预留(目前与 2 相同)",
+      "min": 0,
+      "max": 6,
+      "default": 1,
       "unit": 1
     },
     {

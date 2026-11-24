@@ -18,6 +18,7 @@ CLUSTER_DIR = CARROT_DIR / "cluster"
 OPENPILOT_ROOT = CARROT_DIR.parents[1]
 HUD_PARAM = "ClusterHud"
 HUD_DEBUG_PARAM = "ClusterHudDebug"
+DISPLAY_MODE_PARAM = "ClusterHudDisplayMode"   # 0: the HUD shows nothing (cluster_config.CLUSTER_DISPLAY_MODE_OFF)
 HUD_ENCODER_PARAM = "ClusterHudEncoder"
 HUD_LIVE_FPS_PARAM = "ClusterHudLiveFps"
 HUD_CORE_MODE_PARAM = "ClusterHudCoreMode"
@@ -194,8 +195,25 @@ def _read_is_onroad(params: Params) -> bool:
         return False
 
 
+def _read_display_off(params: Params) -> bool:
+    """ClusterHudDisplayMode 0 turns the HUD off; a missing or unreadable value counts as on (default 1)."""
+    try:
+        return int(params.get_int(DISPLAY_MODE_PARAM)) == 0
+    except Exception as exc:
+        print(f"[cluster_autorun] failed to read {DISPLAY_MODE_PARAM}: {exc}", flush=True)
+        return False
+
+
 def _hud_output_allowed(params: Params) -> bool:
+    if _read_display_off(params):
+        return False
     return _read_hud_debug_mode(params) >= 1 or _read_is_onroad(params)
+
+
+def _hud_output_off_reason(params: Params) -> str:
+    if _read_display_off(params):
+        return f"{DISPLAY_MODE_PARAM}=0"
+    return f"{HUD_DEBUG_PARAM}=0 and {IS_ONROAD_PARAM}=0"
 
 
 def _read_encoder_mode(params: Params) -> int:
@@ -467,8 +485,7 @@ def _wait_for_supported_usb_device(params: Params, expected_product_id: int, rea
                     return None
                 if not _hud_output_allowed(params):
                     print(
-                        f"[cluster_autorun] {HUD_DEBUG_PARAM}=0 and {IS_ONROAD_PARAM}=0; "
-                        "stopping HUD output while waiting for USB",
+                        f"[cluster_autorun] {_hud_output_off_reason(params)}; stopping HUD output while waiting for USB",
                         flush=True,
                     )
                     return None
@@ -524,8 +541,7 @@ def _wait_for_hud_output_allowed(params: Params, expected_product_id: int) -> in
     from cluster_usb_display import product_id_for_hud_mode
 
     print(
-        f"[cluster_autorun] {HUD_DEBUG_PARAM}=0 and {IS_ONROAD_PARAM}=0; "
-        "keeping external HUD output off",
+        f"[cluster_autorun] {_hud_output_off_reason(params)}; keeping external HUD output off",
         flush=True,
     )
     next_hud_check = time.monotonic()
