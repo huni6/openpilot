@@ -123,6 +123,15 @@ def cluster_event_from_alert(text1: object, text2: object, status: object, size:
   return line1, line2, level
 
 
+def event_center_x(width: float, preferred: float, left: float, right: float) -> float:
+  """Where to centre a text block `width` wide that must stay between left and right: at `preferred` when it fits
+  there, else moved just enough to fit (in the middle of the gap when it is wider than the gap)."""
+  half = max(0.0, float(width)) * 0.5
+  if 2.0 * half >= right - left:
+    return (left + right) * 0.5
+  return _clamp(preferred, left + half, right - half)
+
+
 class AmbientEventFade:
   """What the cluster's event box shows and how strongly. A new alert comes in over fade_in_s; it stays while the
   alert is up and for hold_s after it goes (an alert that drops out for a frame does not flicker), then fades out

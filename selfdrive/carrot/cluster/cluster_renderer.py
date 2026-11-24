@@ -62,6 +62,7 @@ from cluster_models import (
 from cluster_layout import (
     AmbientEventFade,
     ambient_bsm_edges,
+    event_center_x,
     ambient_power_gauge,
     extrapolated_media_position_ms,
     fitted_text_size,
@@ -194,17 +195,24 @@ AMBIENT_BSM_LIGHT_CORE_ALPHA = 125.0
 AMBIENT_BSM_FADE_SECONDS = 0.35
 AMBIENT_LFA_ACTIVE_COLOR = (46, 192, 79)
 AMBIENT_LFA_INACTIVE_COLOR = (126, 135, 148)
-# the comma's current alert as text in the open middle of the screen, under the drive status row (speed limit .. lane
-# assist icon, whose middle is about x 905) and clear of the speed (ends near x 470) and the phone media panel
-# (x 1379): no box, the first line big and tinted by level, the second (when the alert has one) grey under it, and a
-# soft glow of the level colour behind them
+# the comma's current alert as text in the open middle of the screen, under the drive status row: no box, the first
+# line big and tinted by level, the second (when the alert has one) grey under it, and a soft glow of the level colour
+# behind them. The text stays between AMBIENT_EVENT_LEFT (clear of a three-digit speed, which ends near x 534) and
+# AMBIENT_EVENT_RIGHT (clear of the phone media panel at x 1379): centred under the drive status row (speed limit ..
+# lane assist icon, whose middle is about x 905) when it fits there, else moved right just enough. A line too wide at
+# its full size is drawn smaller until it fits; '...' only below the smallest size.
 AMBIENT_EVENT_CENTER_X = 905.0
+AMBIENT_EVENT_LEFT = 575.0
+AMBIENT_EVENT_RIGHT = 1355.0
+AMBIENT_EVENT_MAX_W = AMBIENT_EVENT_RIGHT - AMBIENT_EVENT_LEFT
 AMBIENT_EVENT_TITLE_Y = 270.0       # one line
 AMBIENT_EVENT_TITLE_Y_TWO = 250.0   # two lines: the title moves up
-AMBIENT_EVENT_DETAIL_DY = 54.0      # from the title's middle to the second line's
+AMBIENT_EVENT_LINE_GAP = 6.0        # between the first line and the second
 AMBIENT_EVENT_TEXT_SIZE = 58.0
+AMBIENT_EVENT_TEXT_MIN_SIZE = 36.0
 AMBIENT_EVENT_DETAIL_SIZE = 38.0
-AMBIENT_EVENT_MAX_W = 840.0
+AMBIENT_EVENT_DETAIL_RATIO = 0.66   # the second line is at most this much of the first line's size
+AMBIENT_EVENT_DETAIL_MIN_SIZE = 26.0
 AMBIENT_EVENT_GLOW_R = 120.0
 AMBIENT_EVENT_GLOW_STRETCH = 3.2    # the glow is this much wider than tall
 AMBIENT_EVENT_GLOW_ALPHA = 46.0
@@ -2821,27 +2829,34 @@ class ClusterUiRenderer:
         unicode_font = self._event_font_for(f"{event.text} {event.detail}")
         title_font = unicode_font or self._ambient_font("semibold")
         detail_font = unicode_font or self._ambient_font("regular")
-        title = self._ellipsize_ambient_text(event.text, AMBIENT_EVENT_TEXT_SIZE, AMBIENT_EVENT_MAX_W, "semibold", title_font)
-        detail = ""
+        title, title_size, title_w = self._fit_event_line(
+            event.text, title_font, "semibold", AMBIENT_EVENT_TEXT_SIZE, AMBIENT_EVENT_TEXT_MIN_SIZE
+        )
+        detail, detail_size, detail_w = "", 0.0, 0.0
         if event.detail:
-            detail = self._ellipsize_ambient_text(event.detail, AMBIENT_EVENT_DETAIL_SIZE, AMBIENT_EVENT_MAX_W, "regular", detail_font)
+            detail_max = max(AMBIENT_EVENT_DETAIL_MIN_SIZE, min(AMBIENT_EVENT_DETAIL_SIZE, title_size * AMBIENT_EVENT_DETAIL_RATIO))
+            detail, detail_size, detail_w = self._fit_event_line(
+                event.detail, detail_font, "regular", detail_max, AMBIENT_EVENT_DETAIL_MIN_SIZE
+            )
+        center_x = event_center_x(max(title_w, detail_w), AMBIENT_EVENT_CENTER_X, AMBIENT_EVENT_LEFT, AMBIENT_EVENT_RIGHT)
+        detail_dy = title_size * 0.5 + AMBIENT_EVENT_LINE_GAP + detail_size * 0.5
         slide = 1.0 - clamp(event.since / AMBIENT_EVENT_SLIDE_S, 0.0, 1.0)
         title_y = (AMBIENT_EVENT_TITLE_Y_TWO if detail else AMBIENT_EVENT_TITLE_Y) - AMBIENT_EVENT_SLIDE_PX * slide * slide
-        glow_y = title_y + (AMBIENT_EVENT_DETAIL_DY * 0.4 if detail else 0.0)
+        glow_y = title_y + (detail_dy * 0.4 if detail else 0.0)
         pulse = 0.5 + 0.5 * math.sin(now * 6.0) if event.level == "critical" else 0.0
         glow_alpha = int((AMBIENT_EVENT_GLOW_ALPHA + AMBIENT_EVENT_GLOW_PULSE * pulse) * alpha)
         rl.rl_push_matrix()
         try:
-            rl.rl_translatef(AMBIENT_EVENT_CENTER_X, glow_y, 0.0)
+            rl.rl_translatef(center_x, glow_y, 0.0)
             rl.rl_scalef(AMBIENT_EVENT_GLOW_STRETCH, 1.0, 1.0)
             rl.draw_circle_gradient(0, 0, AMBIENT_EVENT_GLOW_R, rl_color(glow, glow_alpha), rl_color(glow, 0))
         finally:
             rl.rl_pop_matrix()
         self._draw_ambient_text(
             title,
-            AMBIENT_EVENT_CENTER_X,
+            center_x,
             title_y,
-            AMBIENT_EVENT_TEXT_SIZE,
+            title_size,
             (*title_color, int(250 * alpha)),
             weight="semibold",
             anchor="center",
@@ -2850,14 +2865,26 @@ class ClusterUiRenderer:
         if detail:
             self._draw_ambient_text(
                 detail,
-                AMBIENT_EVENT_CENTER_X,
-                title_y + AMBIENT_EVENT_DETAIL_DY,
-                AMBIENT_EVENT_DETAIL_SIZE,
+                center_x,
+                title_y + detail_dy,
+                detail_size,
                 (*AMBIENT_EVENT_DETAIL_COLOR, int(235 * alpha)),
                 weight="regular",
                 anchor="center",
                 font_override=detail_font,
             )
+
+    def _fit_event_line(self, text: str, font, weight: str, max_size: float, min_size: float) -> tuple[str, float, float]:
+        """One event line at the largest size up to max_size (down to min_size) that fits AMBIENT_EVENT_MAX_W, with
+        '...' only when it is still too wide at min_size. Returns (text, size, width)."""
+        width, _ = self._measure_text_with_font(font, text, max_size, 0.0)
+        size = fitted_text_size(width, AMBIENT_EVENT_MAX_W - 2.0, max_size, min_size)   # a little slack for rounding
+        if size < max_size:
+            width, _ = self._measure_text_with_font(font, text, size, 0.0)
+        if width > AMBIENT_EVENT_MAX_W:
+            text = self._ellipsize_ambient_text(text, size, AMBIENT_EVENT_MAX_W, weight, font)
+            width, _ = self._measure_text_with_font(font, text, size, 0.0)
+        return text, size, width
 
     def _event_font_for(self, text: str):
         """A font with the event text's own characters (Korean), cached apart from the phone media title's so the

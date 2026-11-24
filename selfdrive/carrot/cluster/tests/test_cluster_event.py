@@ -10,7 +10,7 @@ BUNDLE = Path(__file__).resolve().parents[1]     # the cluster modules import ea
 if str(BUNDLE) not in sys.path:
   sys.path.insert(0, str(BUNDLE))
 
-from cluster_layout import AmbientEventFade, cluster_event_from_alert
+from cluster_layout import AmbientEventFade, cluster_event_from_alert, event_center_x, fitted_text_size
 
 
 def test_event_lines_and_level_from_the_alert():
@@ -98,3 +98,20 @@ def test_the_parser_carries_the_alert_into_the_cluster_state():
                                     alertSize="none"))
   state = route.frame_to_state(parser._frame_from_car_state(car_state, 1.1))
   assert (state.event_text, state.event_detail, state.event_level) == ("", "", "")
+
+
+def test_event_text_stays_centred_under_the_status_row_and_moves_right_only_when_it_must():
+  left, right = 575.0, 1355.0
+  assert event_center_x(400, 905, left, right) == 905           # short: under the drive status row
+  assert event_center_x(660, 905, left, right) == 905           # just fits there (575 .. 1235)
+  assert event_center_x(700, 905, left, right) == pytest.approx(925)   # moved right just enough to clear the speed
+  assert event_center_x(780, 905, left, right) == pytest.approx(965)   # as wide as the gap: fills it
+  assert event_center_x(900, 905, left, right) == pytest.approx(965)
+  assert event_center_x(-5, 905, left, right) == 905
+
+
+def test_a_long_first_line_is_drawn_smaller_down_to_a_floor():
+  assert fitted_text_size(700, 778, 58, 36) == 58               # fits: full size
+  assert fitted_text_size(841, 778, 58, 36) == pytest.approx(53.65, abs=0.01)   # brakeHold: a little smaller
+  assert fitted_text_size(1237, 778, 58, 36) == pytest.approx(36.48, abs=0.01)  # calibrationInvalid on comma 4
+  assert fitted_text_size(2000, 778, 58, 36) == 36              # beyond the floor: '...' takes over
